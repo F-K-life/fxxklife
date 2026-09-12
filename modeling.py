@@ -16,6 +16,8 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
+from provider_tls import request_headers, secure_context
+
 
 SYSTEM_PROMPT = """你是「未来的我」里的 AI 理想自我模拟，不是真实未来本人。
 先理解用户此刻的处境，再给一个问题或一个可由用户选择的小行动。
@@ -162,8 +164,8 @@ def _generate(prompt, context, fallback, validate, max_tokens=1200):
                        "response_format": {"type": "json_object"}, "messages": messages}
             request = urllib.request.Request(base + ("" if base.endswith("/chat/completions") else "/chat/completions"),
                 data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                headers={"Authorization": "Bearer " + os.environ["AI_API_KEY"], "Content-Type": "application/json"}, method="POST")
-            with urllib.request.urlopen(request, timeout=min(15, remaining)) as response:
+                headers=request_headers(os.environ["AI_API_KEY"]), method="POST")
+            with urllib.request.urlopen(request, timeout=min(15, remaining), context=secure_context()) as response:
                 raw = response.read(131073)
             if len(raw) > 131072 or time.monotonic() > deadline:
                 raise ValueError("response_limit")

@@ -8,11 +8,11 @@
 
 ## 立即运行
 
-Windows 双击 `START.cmd`，打开 [本地应用](http://127.0.0.1:5056)。也可在本目录执行：
+Windows 双击 `START.cmd`，打开 [本地应用](http://127.0.0.1:5000)。也可在本目录执行：
 
 ```powershell
 python -m pip install -r requirements.txt
-$env:PORT = '5056'
+$env:PORT = '5000'
 python app.py
 ```
 
@@ -39,14 +39,25 @@ python app.py
 接入兼容 Chat Completions 的服务，在启动前设置服务端环境变量：
 
 ```powershell
-$env:AI_BASE_URL = 'https://你的模型服务地址/v1'
-$env:AI_MODEL = '你的模型名称'
+$env:AI_BASE_URL = 'https://api.openai-next.com/v1'
+$env:AI_MODEL = 'deepseek-v4-flash'
 $env:AI_API_KEY = '你的服务端密钥'
-$env:PORT = '5056'
+$env:PORT = '5000'
 python app.py
 ```
 
-密钥不传入 HTML，也不保存在浏览器。`.env.example` 是配置说明，应用不自动读取 `.env`，避免增加依赖。远程推理包含超时、响应尺寸限制、字段 / 引用验证；失败时明确回到本地规则。第三方模型只收到当前对话所需的画像与授权证据，用户在对话页能看到实际生成模式。
+密钥不传入 HTML，也不保存在浏览器。`.env.example` 是配置说明，应用不自动读取 `.env`，避免增加依赖。远程推理包含严格 TLS 证书校验、超时、响应尺寸限制、字段 / 引用验证；失败时明确回到本地规则。第三方模型只收到当前对话所需的画像与授权证据，用户在对话页能看到实际生成模式。
+
+在启动应用前运行真实服务 harness，可同时检查 Chat Completions 协议和项目的 `chat_reply` 结构化输出：
+
+```bash
+export AI_BASE_URL='https://api.openai-next.com/v1'
+export AI_MODEL='deepseek-v4-flash'
+export AI_API_KEY='SERVER_SIDE_TOKEN'
+.venv/bin/python provider_harness.py
+```
+
+harness 不接受命令行密钥，不输出密钥或响应原始包；任一协议、结构或远程模式检查失败时都会以非零状态退出。
 
 `modeling.py` 提供以下独立函数：
 
@@ -86,6 +97,8 @@ python app.py
 app.py                 Flask 路由、权限、SQLite 迁移、计时状态机、持久任务
 extras.py              目标、历史、资料、草稿版本、通知、定时周回顾
 modeling.py            来源检索、节奏建议、可选模型调用、事实回响
+provider_tls.py         模型请求的 CA 信任库和明确客户端标识
+provider_harness.py     OpenAI 兼容协议 + 应用建模层真实探针
 templates/             Jinja2 页面与共用导航
 static/css/            共享令牌 + 各页面独立 CSS
 static/js/             共用请求 / 草稿同步 / 音频工具 + 各页面交互
@@ -93,6 +106,7 @@ static/sw.js           仅缓存分账号页面壳和公共静态资产，不缓
 static/img/            本地视觉素材
 instance/              本机运行数据（不进 Git / 交付包）
 smoke.py               一条无外部服务的完整流程检查
+test_provider_harness.py harness 的离线协议、TLS 与脱敏单元测试
 ```
 
 `task_id → session_id → event_id → letter / memory` 串联行为与证据。计时用服务端时间区间，不用前端刷新次数累计；暂停不计时，时间到不推断任务完成。`ending` 状态先落库，再填写结果。来信生成失败不回滚行动事实。
