@@ -34,6 +34,10 @@ python app.py
 
 账号、画像与全部记录保存在 `instance/future_self.db`；会话密钥在首次运行时生成并保存于 `instance/.session-secret`。这些运行数据已加入 Git 忽略规则。重启应用不会清空数据，但会要求重新登录，避免上次使用的账号直接进入沟通页。
 
+## ModelScope 部署
+
+仓库根目录包含 `ms_deploy.json` 与 `Dockerfile`，按 ModelScope Docker Studio 规范由 Gunicorn 在 `0.0.0.0:7860` 启动。部署时选择 Docker SDK；不要选择 Gradio，因为本项目是 Flask 应用。`instance/` 会在容器运行时创建，不打包本地数据库和会话密钥。
+
 ## 已实现的体验
 
 - **登录 / 注册**：密码哈希、登录尝试限制、CSRF、独立临时账号、会话隔离。
