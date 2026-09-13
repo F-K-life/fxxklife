@@ -19,7 +19,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from provider_tls import request_headers, secure_context
-from provider_response import assistant_json
+from provider_response import assistant_json, assistant_text
 
 
 logger = logging.getLogger("self_echo.modeling")
@@ -182,7 +182,7 @@ def _provider_error_category(error):
     return "unexpected"
 
 
-def _generate(prompt, context, fallback, validate, max_tokens=1200):
+def _generate(prompt, context, fallback, validate, max_tokens=1200, plain_text=None):
     """One provider request plus at most one schema repair, within 15 seconds total."""
     if not _model_meta()["available"]:
         return {**fallback, "model": _local_meta()}
@@ -196,6 +196,7 @@ def _generate(prompt, context, fallback, validate, max_tokens=1200):
         if len(serialized) > 32000:
             raise ValueError("context_too_large")
         messages = [{"role": "system", "content": prompt}, {"role": "user", "content": serialized}]
+        envelope = None
         for attempt in range(2):
             remaining = deadline - time.monotonic()
             if remaining <= 0.2:
@@ -215,6 +216,12 @@ def _generate(prompt, context, fallback, validate, max_tokens=1200):
                 result = validate(assistant_json(envelope))
                 return {**result, "model": _model_meta()}
             except (ValueError, TypeError, KeyError, IndexError):
+                if plain_text is not None and envelope is not None:
+                    try:
+                        result = plain_text(assistant_text(envelope))
+                        return {**result, "model": _model_meta()}
+                    except (ValueError, TypeError, KeyError, IndexError):
+                        pass
                 if attempt:
                     raise ValueError("invalid_schema")
                 messages.append({"role": "user", "content": "上次输出未通过结构或来源校验。请重新严格按最初的 JSON 协议回答；只引用本次数据中的来源，不添加额外字段。"})
@@ -421,7 +428,12 @@ def chat_reply(message, profile, memories, recent_messages, stats):
                             for item in (stats.get("feedback") or [])[-5:] if isinstance(item, dict)]
                             if isinstance(stats.get("feedback"), list) else _text(stats.get("feedback"), 300)}
     prompt = SYSTEM_PROMPT + "\nfeedback是用户已提交的交流反馈，最新的listen/dismiss_action表示先不建议；direct表示简短直接。当前用户明确改变要求时优先采用当前要求。correction未提供具体新内容时，邀请用户编辑画像，不杜撰修正。current_task/active_session是实际状态，不根据计时猜测任务完成。"
-    result = _generate(prompt, context, local, lambda value: _validate_reply(value, evidence), 900)
+    def plain_reply(text):
+        if not 1 <= len(text) <= 1800:
+            raise ValueError("invalid_plain_reply")
+        return {"reply_text": text, "intent": "clarify", "action_suggestion": None, "evidence_ids": []}
+
+    result = _generate(prompt, context, local, lambda value: _validate_reply(value, evidence), 900, plain_reply)
     requested = _minutes(message)
     if requested and result["action_suggestion"] and re.search(r"只有|最多|愿意|改成|缩短到|只想|just|only", message.lower()):
         result["action_suggestion"]["planned_minutes"] = requested

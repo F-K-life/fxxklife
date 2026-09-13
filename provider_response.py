@@ -56,3 +56,18 @@ def assistant_json(envelope):
         return _json_object(text)
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         raise ValueError("provider response did not contain JSON assistant content") from exc
+
+
+def assistant_text(envelope):
+    """Return visible assistant text from common compatible response shapes."""
+    try:
+        message = envelope["choices"][0]["message"]
+        text = _content_text(message.get("content"))
+        if not text:
+            text = _content_text(message.get("reasoning_content"))
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.I | re.S).strip()
+        if not text:
+            raise ValueError("empty assistant content")
+        return text
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        raise ValueError("provider response did not contain assistant text") from exc
