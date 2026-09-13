@@ -8,11 +8,11 @@
 
 ## 立即运行
 
-Windows 双击 `START.cmd`，打开 [本地应用](http://127.0.0.1:5000)。也可在本目录执行：
+Windows 双击 `START.cmd`，打开 [本地应用](http://127.0.0.1:5001)。也可在本目录执行：
 
 ```powershell
 python -m pip install -r requirements.txt
-$env:PORT = '5000'
+$env:PORT = '5001'
 python app.py
 ```
 
@@ -42,7 +42,7 @@ python app.py
 $env:AI_BASE_URL = 'https://api.openai-next.com/v1'
 $env:AI_MODEL = 'deepseek-v4-flash'
 $env:AI_API_KEY = '你的服务端密钥'
-$env:PORT = '5000'
+$env:PORT = '5001'
 python app.py
 ```
 

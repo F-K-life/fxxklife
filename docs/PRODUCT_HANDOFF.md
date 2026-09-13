@@ -40,13 +40,13 @@ cd fxxklife
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 $env:HOST = '127.0.0.1'
-$env:PORT = '5000'
+$env:PORT = '5001'
 .\.venv\Scripts\python.exe app.py
 ```
 
-打开 <http://127.0.0.1:5000/>。也可在 Python / Flask 就绪后双击 `START.cmd`；它设置默认端口 5000，不负责激活虚拟环境。
+打开 <http://127.0.0.1:5001/>。也可在 Python / Flask 就绪后双击 `START.cmd`；它设置默认端口 5001，不负责激活虚拟环境。
 
-**注意实际默认值：** 直接执行 `python app.py` 且未设环境变量时，代码默认监听 `0.0.0.0:5000`；本机演示请显式设置上面的 HOST 与 PORT。`.env.example` 仅是说明，不会被自动加载。
+**注意实际默认值：** 直接执行 `python app.py` 且未设环境变量时，代码默认监听 `0.0.0.0:5001`；本机演示请显式设置上面的 HOST 与 PORT。`.env.example` 仅是说明，不会被自动加载。
 
 ### 首次使用
 
@@ -59,7 +59,7 @@ $env:PORT = '5000'
 
 | 变量 | 作用 / 操作约定 |
 |---|---|
-| `HOST` / `PORT` | 绑定地址与端口；本机用 127.0.0.1:5000 |
+| `HOST` / `PORT` | 绑定地址与端口；本机用 127.0.0.1:5001 |
 | `AI_API_KEY` | 服务端模型密钥；不写进源码、前端或交接文档 |
 | `AI_MODEL` | 模型供应商的实际模型名 |
 | `AI_BASE_URL` | 兼容 Chat Completions 的 API 基址；按供应商接口填写 |
@@ -297,7 +297,7 @@ python smoke.py
 
 | 现象 | 先检查什么 |
 |---|---|
-| 端口不对 | START.cmd 与直接运行 app.py 均默认使用 5000；也可查看终端实际监听地址 |
+| 端口不对 | START.cmd 与直接运行 app.py 均默认使用 5001；也可查看终端实际监听地址 |
 | 总显示本地规则 | 当前进程的AI_API_KEY/AI_MODEL/AI_BASE_URL；`.env`不会自动加载；检查供应商返回格式 |
 | 来信待生成 | 服务是否运行、jobs状态/尝试次数、来源和授权是否变化；不要重复制造事件 |
 | 暂停/结束待同步 | 回产生操作的设备恢复连接；检查FIFO首项错误；异常时间在回响校正 |

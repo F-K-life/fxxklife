@@ -76,12 +76,13 @@
   if(FS.voice?.available){
     $('#voice-input').onclick=async()=>{
       if(busy)return;
-      if(listening){FS.voice.stop();listening=false;$('#voice-input').classList.remove('recording');$('#voice-input').setAttribute('aria-label','开始语音输入');return;}
-      const prefix=input.value;listening=true;$('#voice-input').classList.add('recording');$('#voice-input').setAttribute('aria-label','停止语音输入');$('#voice-status').hidden=false;$('#voice-status').textContent='识别文字会先放入草稿，由你确认后发送。';
-      try{await FS.voice.listen(text=>{if(!busy){input.value=(prefix+(prefix?'\n':'')+text).slice(0,4000);storeInput();}},()=>{listening=false;$('#voice-input').classList.remove('recording');$('#voice-input').setAttribute('aria-label','开始语音输入');$('#voice-status').textContent='识别已停止。可以先修改文字，再决定发送。';});}
-      catch(error){listening=false;$('#voice-input').classList.remove('recording');$('#voice-input').setAttribute('aria-label','开始语音输入');FS.toast(error.message,'error');}
+      const waveform=$('#voice-waveform'),live=$('#voice-live-text');
+      if(listening){FS.voice.stop();listening=false;form.classList.remove('voice-active');waveform.hidden=true;$('#voice-input').classList.remove('recording');$('#voice-input').setAttribute('aria-label','开始语音输入');return;}
+      let committed=input.value;const join=()=>committed+(committed?'\n':'');listening=true;form.classList.add('voice-active');waveform.hidden=false;$('#voice-input').classList.add('recording');$('#voice-input').setAttribute('aria-label','停止语音输入');$('#voice-status').hidden=false;$('#voice-status').textContent='实时转写只进入输入草稿，发送仍由你确认。';
+      try{await FS.voice.listen(text=>{if(!busy){committed=(join()+text).slice(0,4000);input.value=committed;live.textContent=text||'正在听你说';storeInput();}},()=>{listening=false;form.classList.remove('voice-active');waveform.hidden=true;$('#voice-input').classList.remove('recording');$('#voice-input').setAttribute('aria-label','开始语音输入');if(!$('#voice-status').textContent||$('#voice-status').textContent==='实时转写只进入输入草稿，发送仍由你确认。')$('#voice-status').textContent='识别已停止。可以先修改文字，再决定发送。';},text=>{if(!busy){input.value=(join()+text).slice(0,4000);live.textContent=text||'正在听你说';resize();}},code=>{const messages={'no-speech':'没有听到清晰语音，请靠近麦克风后再试。','not-allowed':'麦克风权限被拒绝，请允许此页面使用麦克风。','service-not-allowed':'浏览器未允许语音识别服务，请在 Chrome 或 Safari 中重试。','audio-capture':'没有检测到可用麦克风，请检查系统输入设备。','network':'语音识别服务连接失败，请检查网络后再试。'};if(code!=='aborted')$('#voice-status').textContent=messages[code]||`语音识别暂未完成（${code}），可以再次尝试。`;});}
+      catch(error){listening=false;form.classList.remove('voice-active');waveform.hidden=true;$('#voice-input').classList.remove('recording');$('#voice-input').setAttribute('aria-label','开始语音输入');FS.toast(error.message,'error');}
     };
-  }else{$('#voice-input').disabled=true;$('#voice-input').title='当前浏览器未提供语音识别，可继续键盘输入';$('#voice-status').hidden=false;$('#voice-status').textContent='当前浏览器未提供语音输入。支持语音播放时，可点击回复下方的“朗读”。';}
+  }else{$('#voice-input').disabled=true;$('#voice-input').setAttribute('aria-disabled','true');$('#voice-input').title='当前浏览器未提供语音识别，可继续键盘输入';$('#voice-status').hidden=false;$('#voice-status').textContent='当前浏览器未提供实时语音识别。请使用 Chrome 或 Safari，并允许麦克风权限；你仍可继续打字。';}
   window.addEventListener('pagehide',stopSpeaking);
   window.addEventListener('fs:draft',event=>{
     if(busy)return;const {key,value}=event.detail||{};

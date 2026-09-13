@@ -4,6 +4,9 @@
   const sourceNames={reflection:'行动反思',letter:'授权书信',onboarding:'首次自述',chat:'对话自述',profile:'手动画像',import:'授权资料',manual:'手动修正'};
   let state,editingMemory,busy=false,refreshVersion=0,history=[],materials=[],historyLoaded=false,viewingHistory,profileBase;
   let preferences,preferencesDirty=false,materialsVersion=0,importLinkOpened=false;
+  let avatarDraft=FS.load('profile-avatar-style',{style:0,tone:0});
+  const avatarSvg=(style=0,tone=0)=>{const colors=[['#a58aff','#33234f'],['#e6c78f','#553b2f'],['#91b8e8','#263e62'],['#d991ad','#592b49']][tone]||['#a58aff','#33234f'],gradient=`avatar-bg-${style}-${tone}`;const hair=[`<path d="M19 28c1-13 9-20 21-20s20 7 21 20c-8-7-14-9-21-9s-13 2-21 9Z"/>`,`<path d="M17 31c-3-14 5-25 23-25s26 11 23 25c-4-4-7-6-10-7-3-10-23-10-26 0-3 1-6 3-10 7Z"/><circle cx="18" cy="24" r="5"/><circle cx="62" cy="24" r="5"/>`,`<path d="M16 29c0-15 9-23 24-23s24 8 24 23v30H54V27c-8-9-20-9-28 0v32H16Z"/>`,`<path d="M17 27c5-13 12-19 23-19s18 6 23 19H17Z"/><path d="M13 27h54v7H13Z"/>`][style]||'';return `<svg viewBox="0 0 80 80" aria-hidden="true"><defs><linearGradient id="${gradient}" x1="0" y1="0" x2="1" y2="1"><stop stop-color="${colors[0]}"/><stop offset="1" stop-color="${colors[1]}"/></linearGradient></defs><rect width="80" height="80" rx="26" fill="url(#${gradient})"/><g fill="#17121f">${hair}</g><circle cx="40" cy="35" r="17" fill="#f1d7c2"/><path d="M24 33c4-10 10-15 18-15 7 0 13 4 16 11-10 1-17-2-22-6-2 6-6 9-12 10Z" fill="#17121f"/><circle cx="34" cy="36" r="1.4" fill="#332733"/><circle cx="46" cy="36" r="1.4" fill="#332733"/><path d="M36 44c3 2 5 2 8 0" fill="none" stroke="#9d5f66" stroke-linecap="round" stroke-width="1.5"/><path d="M17 75c2-15 11-23 23-23s21 8 23 23" fill="${colors[0]}" stroke="rgba(255,255,255,.45)"/></svg>`;};
+  function paintAvatar(){const node=$('profile-avatar');if(node)node.innerHTML=avatarSvg(avatarDraft.style,avatarDraft.tone);document.querySelectorAll('[data-avatar-style]').forEach(b=>{b.innerHTML=avatarSvg(Number(b.dataset.avatarStyle),avatarDraft.tone);b.classList.toggle('active',Number(b.dataset.avatarStyle)===avatarDraft.style);});document.querySelectorAll('[data-avatar-tone]').forEach(b=>b.classList.toggle('active',Number(b.dataset.avatarTone)===avatarDraft.tone));}
   async function action(fn){if(busy)return;busy=true;try{await fn();}catch(error){FS.toast(error.message,'error');}finally{busy=false;}}
   async function refresh(){const version=++refreshVersion,result=await FS.state();if(version!==refreshVersion)return;state=result;preferences=result.preferences||preferences;render();}
   function sourceLink(ref,revoked=false){
@@ -14,7 +17,7 @@
   }
   function render(){
     const {user,profile,model}=state;
-    $('profile-name').textContent=user.name;$('profile-avatar').textContent=Array.from(user.name||'我')[0];
+    $('profile-name').textContent=user.name;paintAvatar();
     $('account-badge').textContent=user.is_demo?'HACKATHON · 独立临时档案':'YOUR PERSONAL SPACE';
     $('profile-version').textContent=`画像版本 ${profile.version||1}`;$('profile-actions').textContent=state.events.length;
     $('profile-evidence').textContent=model.evidence_count||0;$('model-status').textContent=model.status||'还在了解你';
@@ -51,6 +54,10 @@
     $('profile-dialog').showModal();
   }
   $('edit-profile').onclick=()=>{if(state)openProfile();};
+  $('profile-avatar').onclick=$('customize-avatar').onclick=()=>{$('avatar-dialog').showModal();paintAvatar();};
+  document.querySelectorAll('[data-avatar-style]').forEach(button=>button.onclick=()=>{avatarDraft={...avatarDraft,style:Number(button.dataset.avatarStyle)};paintAvatar();});
+  document.querySelectorAll('[data-avatar-tone]').forEach(button=>button.onclick=()=>{avatarDraft={...avatarDraft,tone:Number(button.dataset.avatarTone)};paintAvatar();});
+  $('save-avatar').onclick=()=>{FS.store('profile-avatar-style',avatarDraft);paintAvatar();$('avatar-dialog').close();FS.toast('小头像已保存在这个账号的浏览器中。');};
   $('profile-form').onsubmit=event=>{event.preventDefault();action(async()=>{
     const button=event.submitter||$('profile-form').querySelector('[type=submit]');button.disabled=true;
     try{

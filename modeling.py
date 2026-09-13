@@ -14,9 +14,30 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import urlparse
 
 from provider_tls import request_headers, secure_context
+
+
+def _load_local_env():
+    """Load local, git-ignored provider settings without adding a dotenv dependency."""
+    path = Path(__file__).resolve().parent / '.env.local'
+    try:
+        lines = path.read_text(encoding='utf-8').splitlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        key, value = key.strip(), value.strip().strip('"').strip("'")
+        if key in {'AI_BASE_URL', 'AI_MODEL', 'AI_API_KEY'} and value and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_local_env()
 
 
 SYSTEM_PROMPT = """你是「未来的我」里的 AI 理想自我模拟，不是真实未来本人。

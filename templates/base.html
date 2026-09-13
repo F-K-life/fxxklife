@@ -2,12 +2,13 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="csrf-token" content="{{ csrf_token }}"><meta name="theme-color" content="#f5f7fa">
+  <meta name="csrf-token" content="{{ csrf_token }}"><meta name="theme-color" content="oklch(12% 0.025 285)">
   <meta name="description" content="和未来的自己，见一面。让理解，最终发生为行动。">
   <title>{% block title %}未来的我{% endblock %} · Future Self</title>
   <link rel="icon" href="{{ url_for('static',filename='img/favicon.svg') }}" type="image/svg+xml">
   <link rel="stylesheet" href="{{ url_for('static',filename='css/base.css') }}">
   {% block head %}{% endblock %}
+  <link rel="stylesheet" href="{{ url_for('static',filename='css/liquid-glass.css') }}">
 </head>
 <body data-page="{{ page }}" data-user-id="{{ current_user.id if current_user else 'anonymous' }}" class="{% if page in ['login','register','onboarding'] %}entry-body{% else %}app-body{% endif %}">
   <svg xmlns="http://www.w3.org/2000/svg" class="svg-library" aria-hidden="true"><defs>

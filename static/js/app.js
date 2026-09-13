@@ -42,11 +42,11 @@
    audioSource=audioContext.createBufferSource();audioSource.buffer=buffer;audioSource.loop=true;audioSource.mode=mode;const filter=audioContext.createBiquadFilter();filter.type=mode==='rain'?'highpass':'lowpass';filter.frequency.value=mode==='rain'?850:mode==='stream'?1500:400;audioGain=audioContext.createGain();audioGain.gain.value=0;audioSource.connect(filter).connect(audioGain).connect(audioContext.destination);audioSource.start();audioGain.gain.setTargetAtTime(volume,audioContext.currentTime,.2);
   }},
   voice:{available:!!(window.SpeechRecognition||window.webkitSpeechRecognition),recognition:null,
-   async listen(onText,onEnd=()=>{}){
+   async listen(onText,onEnd=()=>{},onInterim=()=>{},onError=()=>{}){
     if(this.recognition){this.recognition.stop();return;}
     if(!this.available){FS.toast('此浏览器未提供语音识别。文字输入与朗读仍可使用。');onEnd();return;}
     if(!FS.load('voice-consent')){const dialog=document.getElementById('voice-consent-dialog');const accepted=await new Promise(resolve=>{dialog.addEventListener('close',()=>resolve(dialog.returnValue==='allow'),{once:true});dialog.returnValue='';dialog.showModal();});if(!accepted){onEnd();return;}save('voice-consent',true);}
-    const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition,r=this.recognition=new Recognition();r.lang='zh-CN';r.interimResults=false;r.continuous=false;r.onresult=e=>onText(Array.from(e.results).filter(x=>x.isFinal).map(x=>x[0].transcript).join(''));r.onerror=e=>FS.toast(e.error==='not-allowed'?'麦克风尚未授权。':'这次识别未完成，可以再次尝试。');r.onend=()=>{this.recognition=null;onEnd();};try{r.start();}catch{this.recognition=null;onEnd();}
+    const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition,r=this.recognition=new Recognition();r.lang='zh-CN';r.interimResults=true;r.continuous=true;r.onresult=e=>{let finalText='',interim='';for(let i=e.resultIndex;i<e.results.length;i++){const text=e.results[i][0].transcript;if(e.results[i].isFinal)finalText+=text;else interim+=text;}if(interim)onInterim(interim);if(finalText)onText(finalText);};r.onerror=e=>{const code=e.error||'unknown';onError(code);if(!['no-speech','aborted'].includes(code))FS.toast(code==='not-allowed'||code==='service-not-allowed'?'麦克风权限被拒绝，请允许此页面使用麦克风。':code==='audio-capture'?'没有检测到可用麦克风，请检查系统输入设备。':code==='network'?'语音识别服务连接失败，请检查网络后再试。':'语音识别暂未完成（'+code+'），可以再次尝试。');};r.onend=()=>{this.recognition=null;onEnd();};try{r.start();}catch(error){this.recognition=null;onError('start-failed');onEnd();}
    },
    speak(value,onEnd=()=>{}){if(!window.speechSynthesis){FS.toast('此浏览器未提供朗读引擎。');onEnd();return;}speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(value);u.lang='zh-CN';u.rate=.92;u.onend=onEnd;u.onerror=onEnd;speechSynthesis.speak(u);},
    stop(){this.recognition?.stop();window.speechSynthesis?.cancel();}
@@ -59,6 +59,19 @@
  document.querySelector('.motion-toggle')?.addEventListener('click',e=>{const active=document.documentElement.classList.toggle('reduced-motion');FS.store('reduced-motion',active);e.currentTarget.setAttribute('aria-pressed',String(active));FS.toast(active?'已开启减少动效':'已恢复轻柔动效');});
  document.querySelectorAll('.live-date').forEach(el=>el.textContent=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long'}).format(new Date()));
  document.querySelectorAll('dialog').forEach(dialog=>dialog.addEventListener('click',e=>{if(e.target===dialog){const r=dialog.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)dialog.close();}}));
+ const liquidTargets=document.querySelectorAll('.glass-card,.sidebar,.topbar,.chat-welcome,.future-postcard,.auth-form-panel,.question-card,.focus-sanctuary,.focus-sound,.identity-card,.echo-feature,.mailbox-section,.chat-composer,.quick-prompts button');
+ liquidTargets.forEach(el=>{
+  el.addEventListener('pointermove',event=>{const rect=el.getBoundingClientRect();if(!rect.width||!rect.height)return;el.style.setProperty('--liquid-x',`${((event.clientX-rect.left)/rect.width)*100}%`);el.style.setProperty('--liquid-y',`${((event.clientY-rect.top)/rect.height)*100}%`);},{passive:true});
+  el.addEventListener('pointerleave',()=>{el.style.removeProperty('--liquid-x');el.style.removeProperty('--liquid-y');});
+  el.addEventListener('pointerdown',()=>el.classList.add('liquid-pressed'),{passive:true});
+  el.addEventListener('pointerup',()=>el.classList.remove('liquid-pressed'),{passive:true});
+  el.addEventListener('pointercancel',()=>el.classList.remove('liquid-pressed'),{passive:true});
+ });
+ document.querySelectorAll('a[href^="/"]').forEach(link=>link.addEventListener('click',event=>{
+  if(event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;
+  const href=link.getAttribute('href');if(!href||href.startsWith('//')||href.startsWith('/api/'))return;
+  document.body.classList.add('is-navigating');
+ }));
  document.querySelector('#open-notifications')?.addEventListener('click',()=>{document.querySelector('#notification-dialog').showModal();FS.notifications().catch(e=>FS.toast(e.message,'error'));});document.querySelector('#close-notifications')?.addEventListener('click',()=>document.querySelector('#notification-dialog').close());
  document.querySelector('#notification-list')?.addEventListener('click',async e=>{const b=e.target.closest('[data-notification]');if(!b)return;const n=notifications.find(n=>n.id===Number(b.dataset.notification));try{await FS.api('/api/notifications/'+n.id,{method:'PATCH',body:{is_read:true}});location.href=n.href;}catch(e){FS.toast(e.message,'error');}});
  document.querySelector('form[action="/logout"]')?.addEventListener('submit',e=>{e.preventDefault();FS.clearLocal().finally(()=>e.target.submit());});if(user==='anonymous')return;
