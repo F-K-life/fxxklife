@@ -1,4 +1,4 @@
-# 未来的我 · Future Self
+# 明日见 Self Echo
 
 **接手入口：[产品与技术交接文档](docs/PRODUCT_HANDOFF.md)** · [PRD 完成对照](PRD_COMPLETION.md)
 
@@ -18,7 +18,7 @@ python app.py
 
 默认从登录页开始。注册正式账号后进入五问建档；**使用黑客松临时账号**会创建独立的体验账号，直接进入沟通。临时账号只有显式标记的 DEMO 画像，没有伪造的聊天、专注时间或完成记录。无需共享用户名和密码。
 
-账号、画像与全部记录保存在 `instance/future_self.db`；会话密钥在首次运行时生成并保存于 `instance/.session-secret`。这些运行数据已加入 Git 忽略规则。重启应用不会清空数据。
+账号、画像与全部记录保存在 `instance/future_self.db`；会话密钥在首次运行时生成并保存于 `instance/.session-secret`。这些运行数据已加入 Git 忽略规则。重启应用不会清空数据，但会要求重新登录，避免上次使用的账号直接进入沟通页。
 
 ## 已实现的体验
 
@@ -102,7 +102,7 @@ provider_harness.py     OpenAI 兼容协议 + 应用建模层真实探针
 templates/             Jinja2 页面与共用导航
 static/css/            共享令牌 + 各页面独立 CSS
 static/js/             共用请求 / 草稿同步 / 音频工具 + 各页面交互
-static/sw.js           仅缓存分账号页面壳和公共静态资产，不缓存 API 数据
+static/sw.js           仅缓存公共静态资产，不缓存账号页面、身份或 API 数据
 static/img/            本地视觉素材
 instance/              本机运行数据（不进 Git / 交付包）
 smoke.py               一条无外部服务的完整流程检查
@@ -128,7 +128,7 @@ test_provider_harness.py harness 的离线协议、TLS 与脱敏单元测试
 
 语音识别依赖浏览器引擎，部分浏览器将音频发往其识别服务；首次启用前有单独说明，结果由用户确认后发送。[SpeechRecognition 文档](https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition)。朗读使用 [SpeechSynthesis](https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesis)。
 
-离线页面壳需先在线访问；Service Worker 与浏览器通知需 localhost 或 HTTPS。退出时清除本机账号壳与草稿缓存。语音识别并非离线功能；没有麦克风时可以继续打字。
+Service Worker 仅保留公共静态资产；沟通、沉浸、回响和画像等账号页面始终要求在线校验。断线时不会恢复旧账号页面，本机草稿仍会保留并在重新登录后同步。Service Worker 与浏览器通知需 localhost 或 HTTPS。语音识别并非离线功能；没有麦克风时可以继续打字。
 
 服务器运行时执行持久任务和定时回顾；关服期间的任务在重启后恢复，到期信打开应用也会检查。浏览器通知是用户授权后、应用打开时的提醒，不承诺浏览器关闭后的系统推送。站内信不是外部邮件服务。
 

@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token }}"><meta name="theme-color" content="oklch(12% 0.025 285)">
   <meta name="description" content="和未来的自己，见一面。让理解，最终发生为行动。">
-  <title>{% block title %}未来的我{% endblock %} · Future Self</title>
+  <title>{% block title %}明日见 Self Echo{% endblock %} · 明日见 Self Echo</title>
   <link rel="icon" href="{{ url_for('static',filename='img/favicon.svg') }}" type="image/svg+xml">
   <link rel="stylesheet" href="{{ url_for('static',filename='css/base.css') }}">
   {% block head %}{% endblock %}
@@ -41,7 +41,7 @@
   <a href="#main-content" class="skip-link">跳到主要内容</a>
   {% if page not in ['login','register','onboarding'] %}
   <aside class="sidebar">
-    <a class="brand" href="/chat" aria-label="未来的我，沟通页"><span class="brand-mark"><span></span></span><span>未来的我<small>FUTURE SELF</small></span></a>
+    <a class="brand" href="/chat" aria-label="明日见 Self Echo，沟通页"><span class="brand-mark"><span></span></span><span>明日见<small>SELF ECHO</small></span></a>
     <div class="sidebar-label">你的成长空间</div>
     <nav aria-label="主导航">
       {% for key,label,en in [('chat','沟通','Connect'),('focus','沉浸','Immerse'),('echoes','回响','Reflect'),('profile','画像','Discover')] %}

@@ -52,7 +52,7 @@
    stop(){this.recognition?.stop();window.speechSynthesis?.cancel();}
   },
   async notifications(){const result=await this.api('/api/notifications');notifications=result.notifications;const unread=notifications.filter(n=>!n.is_read),badge=document.querySelector('#notification-count');if(badge){badge.textContent=unread.length||'';badge.hidden=!unread.length;}const list=document.querySelector('#notification-list');if(list)list.innerHTML=notifications.length?notifications.map(n=>`<button class="notification-item ${n.is_read?'read':''}" data-notification="${n.id}"><span>${this.escape(n.title)}</span><p>${this.escape(n.body)}</p><small>${this.date(n.created_at)}</small></button>`).join(''):'<p class="empty-state">还没有新的来信提醒。时间会慢慢带来回响。</p>';
-   if(result.preferences.notifications_enabled&&'Notification'in window&&Notification.permission==='granted'){const seen=new Set(this.load('notified',[]));unread.forEach(n=>{if(!seen.has(n.id)){const nfy=new Notification('未来的我',{body:n.title,tag:'future-self-'+n.id});nfy.onclick=()=>{window.focus();location.href=n.href;};seen.add(n.id);}});save('notified',[...seen].slice(-100));}return result;
+   if(result.preferences.notifications_enabled&&'Notification'in window&&Notification.permission==='granted'){const seen=new Set(this.load('notified',[]));unread.forEach(n=>{if(!seen.has(n.id)){const nfy=new Notification('明日见 Self Echo',{body:n.title,tag:'future-self-'+n.id});nfy.onclick=()=>{window.focus();location.href=n.href;};seen.add(n.id);}});save('notified',[...seen].slice(-100));}return result;
   }
  };
  const reduced=FS.load('reduced-motion',matchMedia('(prefers-reduced-motion: reduce)').matches);document.documentElement.classList.toggle('reduced-motion',reduced);

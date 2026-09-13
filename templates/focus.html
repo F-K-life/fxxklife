@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}沉浸 · 未来的我{% endblock %}
+{% block title %}沉浸 · 明日见 Self Echo{% endblock %}
 {% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='css/focus.css') }}">{% endblock %}
 {% block content %}
 <div class="focus-page">
@@ -17,7 +17,7 @@
     </section>
     <aside class="focus-aside">
       <section class="glass-card task-detail-card"><div class="focus-card-label"><span class="eyebrow">YOUR NEXT SMALL STEP</span><svg class="icon"><use href="#i-leaf"></use></svg></div><h2>今天，就这一件。</h2><div class="field task-picker"><label for="task-select">选择一个行动</label><select id="task-select"><option value="">为自己设定一个小行动</option></select></div><div class="task-step"><span class="step-dot">01</span><div><span class="detail-label">从这一步开始</span><p id="task-first-step">把大的愿望，拆成能开始的小事。</p></div></div><div class="task-step"><span class="step-dot">02</span><div><span class="detail-label">做到这里就很好</span><p id="task-done">由你定义，怎样才算完成。</p></div></div><div class="task-duration"><svg class="icon"><use href="#i-clock"></use></svg><span>计划时间</span><strong id="task-duration">25 分钟</strong></div><button type="button" class="text-link adjust-focus-task" id="adjust-focus-task"><svg class="icon"><use href="#i-edit"></use></svg>调整当前行动</button><button type="button" class="button button-secondary new-task-button" id="new-task"><svg class="icon"><use href="#i-plus"></use></svg>设定小行动</button></section>
-      <div class="quiet-reminder"><span class="quiet-symbol">“</span><p>重要的不是从不走神，<br>而是愿意轻轻地回到此刻。</p><span>FROM YOUR FUTURE SELF</span></div>
+      <div class="quiet-reminder"><span class="quiet-symbol">“</span><p>重要的不是从不走神，<br>而是愿意轻轻地回到此刻。</p><span>FROM YOUR IDEAL SELF</span></div>
       <section class="focus-sound glass-card"><div><span class="eyebrow">A QUIETER WORLD</span><h3>选一种安静。</h3></div><div class="sound-options" role="group" aria-label="背景声音"><button type="button" class="active" data-sound="off" aria-pressed="true">静音</button><button type="button" data-sound="rain" aria-pressed="false">轻雨</button><button type="button" data-sound="brown" aria-pressed="false">棕噪声</button><button type="button" data-sound="stream" aria-pressed="false">溪流</button></div><label class="sound-volume">音量<input type="range" id="sound-volume" min="0" max="1" step="0.05" value="0.25" aria-label="背景声音音量"></label><p>本机合成，不录音。每次由你主动开启。</p></section>
       <div class="focus-today"><div><strong id="today-minutes">0</strong><span>分钟，为自己</span></div><div><strong id="today-sessions">0</strong><span>次真实的开始</span></div></div>
     </aside>

@@ -1,4 +1,4 @@
-"""Future Self: a small Flask/Jinja application with owner-scoped SQLite records."""
+"""明日见 Self Echo: a small Flask/Jinja application with owner-scoped SQLite records."""
 import hashlib
 import json
 import math
@@ -119,6 +119,7 @@ def create_app(test_config=None):
         SECRET_KEY=secret, DATABASE=str(Path(app.instance_path) / 'future_self.db'),
         MAX_CONTENT_LENGTH=65536, SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE='Lax', SESSION_COOKIE_SECURE=os.environ.get('COOKIE_SECURE') == '1',
+        STARTUP_NONCE=secrets.token_urlsafe(24),
     )
     if test_config:
         app.config.update(test_config)
@@ -279,7 +280,12 @@ def create_app(test_config=None):
 
     @app.before_request
     def load_identity():
-        g.user = row('SELECT * FROM users WHERE id=?', (session.get('user_id'),)) if session.get('user_id') else None
+        user_id = session.get('user_id')
+        startup_nonce = str(session.get('startup_nonce', ''))
+        if user_id and not secrets.compare_digest(startup_nonce, str(app.config['STARTUP_NONCE'])):
+            session.clear()
+            user_id = None
+        g.user = row('SELECT * FROM users WHERE id=?', (user_id,)) if user_id else None
         if g.user and session.get('auth_version') != g.user['auth_version']:
             session.clear()
             g.user = None
@@ -319,7 +325,8 @@ def create_app(test_config=None):
         db().commit()
         session.clear()
         session.update(user_id=user['id'], auth_version=user['auth_version'],
-                       csrf_token=secrets.token_urlsafe(32), chat_since=now(), profile_token=secrets.token_urlsafe(24))
+                       csrf_token=secrets.token_urlsafe(32), chat_since=now(), profile_token=secrets.token_urlsafe(24),
+                       startup_nonce=app.config['STARTUP_NONCE'])
 
     def create_user(name, email, password=None, demo=False):
         connection = db()

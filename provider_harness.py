@@ -152,7 +152,7 @@ def main():
         started = time.perf_counter()
         result = application_probe()
         print(f"PASS application ({time.perf_counter() - started:.2f}s):", _preview(result["reply_text"]))
-        print("PASS: provider protocol and Future Self application integration")
+        print("PASS: provider protocol and 明日见 Self Echo application integration")
         return 0
     except Exception as exc:  # The CLI must report a safe, actionable failure and exit non-zero.
         print("FAIL:", _safe_error(exc, api_key), file=sys.stderr)

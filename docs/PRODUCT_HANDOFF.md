@@ -1,7 +1,7 @@
-# Future Self｜产品与技术交接文档
+# 明日见 Self Echo｜产品与技术交接文档
 
 > 交接版本：V2 · 2026-09-12  
-> 产品名：未来的我（Future Self）  
+> 产品名：明日见 Self Echo
 > 仓库：F-K-life/fxxklife  
 > 适用对象：产品负责人、设计师、接手开发者、黑客松演示者与部署维护者。
 
@@ -107,7 +107,7 @@ templates/             base + login/register/onboarding/chat/focus/echoes/profil
 static/css/            base.css + 各页面独立CSS
 static/js/app.js        FS.api、账号隔离缓存、草稿同步、语音、环境音、通知
 static/js/*.js          各页面业务交互
-static/sw.js           公共资源与分账号页面壳缓存；不缓存API响应
+static/sw.js           仅缓存公共静态资产；不缓存账号页面、身份或API响应
 static/img/            本地视觉素材
 smoke.py               单条临时数据库闭环检查
 instance/              首次运行生成，不提交Git
@@ -276,8 +276,8 @@ python smoke.py
 ### 运行数据
 
 - `instance/future_self.db`：账号及业务数据。
-- `instance/.session-secret`：自动生成的会话密钥；更换会让既有登录失效。
-- 浏览器有分账号草稿与离线壳。退出清除本机对应缓存，不要把浏览器草稿当成服务端备份。
+- `instance/.session-secret`：自动生成的会话密钥；更换会让既有登录失效。每次服务重启也会通过启动标识要求浏览器重新登录，不会删除账号数据。
+- 浏览器有分账号草稿，但不保存可离线打开的账号页面壳。退出清除本机对应缓存，不要把浏览器草稿当成服务端备份。
 
 停服备份最简单：先停止应用，再备份整个 `instance/` 到受控目录。在线备份应使用SQLite backup接口，不直接复制正在写入的数据库文件。恢复前停止所有应用进程，保留当前数据副本，再恢复选定数据库 / 密钥并启动检查。
 

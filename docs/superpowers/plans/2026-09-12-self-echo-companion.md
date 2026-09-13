@@ -1,4 +1,4 @@
-# Future Self Companion Implementation Plan
+# 明日见 Self Echo Companion Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** React 19, TypeScript, Vite, Vitest, Testing Library, CSS/SVG animation, Lucide React.
 
-**Spec:** `docs/superpowers/specs/2026-09-12-future-self-companion-design.md`
+**Spec:** `docs/superpowers/specs/2026-09-12-self-echo-companion-design.md`
 
 ## Global Constraints
 

@@ -1,4 +1,4 @@
-# “高我”陪伴型 AI 手机 Demo 设计
+# 明日见 Self Echo｜陪伴型 AI 手机 Demo 设计
 
 ## 目标
 
