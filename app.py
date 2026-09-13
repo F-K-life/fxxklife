@@ -119,6 +119,7 @@ def create_app(test_config=None):
         SECRET_KEY=secret, DATABASE=str(Path(app.instance_path) / 'future_self.db'),
         MAX_CONTENT_LENGTH=65536, SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE='Lax', SESSION_COOKIE_SECURE=os.environ.get('COOKIE_SECURE') == '1',
+        MODELSCOPE_STUDIO=os.environ.get('MODELSCOPE_STUDIO') == '1',
         STARTUP_NONCE=secrets.token_urlsafe(24),
     )
     if test_config:
@@ -301,7 +302,10 @@ def create_app(test_config=None):
     @app.after_request
     def response_headers(response):
         response.headers['X-Content-Type-Options'] = 'nosniff'
-        response.headers['X-Frame-Options'] = 'DENY'
+        if app.config['MODELSCOPE_STUDIO']:
+            response.headers['Content-Security-Policy'] = "frame-ancestors 'self' https://www.modelscope.cn"
+        else:
+            response.headers['X-Frame-Options'] = 'DENY'
         response.headers['Referrer-Policy'] = 'same-origin'
         if not request.path.startswith('/static/'):
             response.headers['Cache-Control'] = 'no-store'
