@@ -6,6 +6,7 @@ and annotate each usable memory with source_exists/source_authorized=True.
 
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -18,6 +19,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from provider_tls import request_headers, secure_context
+
+
+logger = logging.getLogger("self_echo.modeling")
 
 
 def _load_local_env():
@@ -163,6 +167,20 @@ def _local_meta(error=None):
     return meta
 
 
+def _provider_error_category(error):
+    if isinstance(error, urllib.error.HTTPError):
+        return f"http_{error.code}"
+    if isinstance(error, TimeoutError):
+        return "timeout"
+    if isinstance(error, urllib.error.URLError):
+        return "connection"
+    if isinstance(error, OSError):
+        return "network_or_tls"
+    if isinstance(error, (KeyError, IndexError, TypeError, ValueError)):
+        return "response_validation"
+    return "unexpected"
+
+
 def _generate(prompt, context, fallback, validate, max_tokens=1200):
     """One provider request plus at most one schema repair, within 15 seconds total."""
     if not _model_meta()["available"]:
@@ -198,8 +216,8 @@ def _generate(prompt, context, fallback, validate, max_tokens=1200):
                 if attempt:
                     raise ValueError("invalid_schema")
                 messages.append({"role": "user", "content": "上次输出未通过结构或来源校验。请重新严格按最初的 JSON 协议回答；只引用本次数据中的来源，不添加额外字段。"})
-    except (ValueError, TypeError, KeyError, IndexError, OSError, urllib.error.URLError):
-        pass
+    except (ValueError, TypeError, KeyError, IndexError, OSError, urllib.error.URLError) as error:
+        logger.warning("model_provider_failure category=%s", _provider_error_category(error))
     return {**fallback, "model": _local_meta("模型连接或结构校验未完成，本次使用本地规则。")}
 
 
