@@ -1,0 +1,2 @@
+document.querySelectorAll('.password-toggle').forEach(button=>button.addEventListener('click',()=>{const input=button.previousElementSibling;const visible=input.type==='password';input.type=visible?'text':'password';button.textContent=visible?'隐藏':'显示';button.setAttribute('aria-label',visible?'隐藏密码':'显示密码');}));
+document.querySelectorAll('form').forEach(form=>form.addEventListener('submit',()=>{const button=form.querySelector('button[type="submit"]');button.disabled=true;button.setAttribute('aria-busy','true');}));

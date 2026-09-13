@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block title %}和未来的自己，见一面{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static',filename='css/login.css') }}">{% endblock %}
+{% block content %}
+<div class="auth-layout">
+  <section class="auth-landscape lighthouse-hero"><a class="brand auth-brand" href="/login"><span class="brand-mark"></span><span>明日见<small>SELF ECHO</small></span></a><div class="landscape-copy"><p class="eyebrow">A LIGHT ACROSS TIME</p><h1>向着光，<br>遇见未来的自己。</h1><p>你不必看清整条路。<br>先让一束光，照亮此刻愿意迈出的那一步。</p></div><footer class="landscape-footer"><span>每一小步，都让未来近一点。</span><span>01 — ∞</span></footer><div class="landscape-caption">A QUIETER SPACE. A CLEARER YOU.</div></section>
+  <section class="auth-form-panel"><span class="auth-edition">DESIGNED FOR YOUR BECOMING</span><div class="auth-form-wrap"><div class="welcome-symbol"><svg class="icon"><use href="#i-spark"></use></svg></div><p class="eyebrow">YOUR NEXT CHAPTER</p><h2>欢迎回到，<br>自己的时间。</h2><p class="auth-subtitle">在这里，慢慢成为你想成为的人。</p>
+  {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/login"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><div class="field"><label for="email">邮箱地址</label><input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required maxlength="254"></div><div class="field"><label for="password">密码</label><div class="password-wrap"><input id="password" name="password" type="password" autocomplete="current-password" placeholder="输入你的密码" required><button class="password-toggle" type="button" aria-label="显示密码">显示</button></div></div><button class="button button-primary auth-submit" type="submit">进入我的空间 <svg class="icon"><use href="#i-arrow-right"></use></svg></button></form>
+  <div class="auth-divider"><span>或，先和未来打个招呼</span></div><form method="post" action="/demo"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-secondary demo-button" type="submit"><svg class="icon"><use href="#i-spark"></use></svg> 使用黑客松临时账号 <span>即刻体验</span></button></form><p class="demo-note">独立体验空间 · 无需注册 · 随时删除</p><p class="auth-switch">第一次来？<a href="/register">创建你的账号 <span>↗</span></a></p>
+  </div><p class="auth-privacy"><svg class="icon"><use href="#i-shield"></use></svg> 你拥有自己的故事。长期记忆由你决定。</p></section>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static',filename='js/auth.js') }}"></script>{% endblock %}
