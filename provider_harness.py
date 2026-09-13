@@ -72,7 +72,6 @@ def protocol_probe(base_url, model, api_key, timeout=15):
         "model": model,
         "temperature": 0,
         "max_tokens": 120,
-        "response_format": {"type": "json_object"},
         "messages": [
             {
                 "role": "system",

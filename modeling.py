@@ -200,8 +200,9 @@ def _generate(prompt, context, fallback, validate, max_tokens=1200):
             remaining = deadline - time.monotonic()
             if remaining <= 0.2:
                 raise TimeoutError("generation_timeout")
+            # Keep the request broadly compatible; the prompt and response parser enforce JSON.
             payload = {"model": os.environ["AI_MODEL"], "temperature": 0.4, "max_tokens": max_tokens,
-                       "response_format": {"type": "json_object"}, "messages": messages}
+                       "messages": messages}
             request = urllib.request.Request(base + ("" if base.endswith("/chat/completions") else "/chat/completions"),
                 data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
                 headers=request_headers(os.environ["AI_API_KEY"]), method="POST")
