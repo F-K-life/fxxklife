@@ -13,6 +13,7 @@ import urllib.request
 from urllib.parse import urlparse
 
 from modeling import chat_reply
+from provider_response import assistant_json
 from provider_tls import request_headers, secure_context
 
 
@@ -33,8 +34,7 @@ def chat_completions_url(base_url):
 
 def parse_protocol_response(envelope):
     try:
-        content = envelope["choices"][0]["message"]["content"]
-        parsed = json.loads(content)
+        parsed = assistant_json(envelope)
         if (
             not isinstance(parsed, dict)
             or parsed.get("status") != "ok"

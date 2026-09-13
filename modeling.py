@@ -19,6 +19,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from provider_tls import request_headers, secure_context
+from provider_response import assistant_json
 
 
 logger = logging.getLogger("self_echo.modeling")
@@ -210,7 +211,7 @@ def _generate(prompt, context, fallback, validate, max_tokens=1200):
                 raise ValueError("response_limit")
             try:
                 envelope = json.loads(raw)
-                result = validate(json.loads(envelope["choices"][0]["message"]["content"]))
+                result = validate(assistant_json(envelope))
                 return {**result, "model": _model_meta()}
             except (ValueError, TypeError, KeyError, IndexError):
                 if attempt:
