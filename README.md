@@ -1,3 +1,17 @@
+---
+# 详细文档见 https://modelscope.cn/docs/%E5%88%9B%E7%A9%BA%E9%97%B4%E5%8D%A1%E7%89%87
+domain: nlp
+tags:
+- AI 陪伴
+- 个人成长
+- 沉浸学习
+datasets:
+  evaluation:
+  test:
+  train:
+models:
+license: Apache License 2.0
+---
 # 明日见 Self Echo
 
 **接手入口：[产品与技术交接文档](docs/PRODUCT_HANDOFF.md)** · [PRD 完成对照](PRD_COMPLETION.md)
