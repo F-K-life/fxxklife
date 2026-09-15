@@ -43,6 +43,23 @@ class ProviderHarnessTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "protocol response"):
             provider_harness.parse_protocol_response({"choices": []})
 
+    def test_parse_protocol_response_accepts_text_parts_and_json_fence(self):
+        content = provider_harness.parse_protocol_response(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": [
+                                {"type": "output_text", "text": "<think>brief reasoning</think>"},
+                                {"type": "text", "text": '```json\n{"status": "ok", "message": "connected"}\n```'},
+                            ]
+                        }
+                    }
+                ]
+            }
+        )
+        self.assertEqual(content["message"], "connected")
+
     def test_verify_application_result_requires_remote_valid_reply(self):
         result = {
             "reply_text": "先打开项目，花五分钟运行一个最小例子。",

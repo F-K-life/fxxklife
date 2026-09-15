@@ -1,3 +1,17 @@
+---
+# 详细文档见 https://modelscope.cn/docs/%E5%88%9B%E7%A9%BA%E9%97%B4%E5%8D%A1%E7%89%87
+domain: nlp
+tags:
+- AI 陪伴
+- 个人成长
+- 沉浸学习
+datasets:
+  evaluation:
+  test:
+  train:
+models:
+license: Apache License 2.0
+---
 # 明日见 Self Echo
 
 **接手入口：[产品与技术交接文档](docs/PRODUCT_HANDOFF.md)** · [PRD 完成对照](PRD_COMPLETION.md)
@@ -19,6 +33,10 @@ python app.py
 默认从登录页开始。注册正式账号后进入五问建档；**使用黑客松临时账号**会创建独立的体验账号，直接进入沟通。临时账号只有显式标记的 DEMO 画像，没有伪造的聊天、专注时间或完成记录。无需共享用户名和密码。
 
 账号、画像与全部记录保存在 `instance/future_self.db`；会话密钥在首次运行时生成并保存于 `instance/.session-secret`。这些运行数据已加入 Git 忽略规则。重启应用不会清空数据，但会要求重新登录，避免上次使用的账号直接进入沟通页。
+
+## ModelScope 部署
+
+仓库根目录包含 `ms_deploy.json` 与 `Dockerfile`，按 ModelScope Docker Studio 规范由 Gunicorn 在 `0.0.0.0:7860` 启动。部署时选择 Docker SDK；不要选择 Gradio，因为本项目是 Flask 应用。`instance/` 会在容器运行时创建，不打包本地数据库和会话密钥。
 
 ## 已实现的体验
 
