@@ -752,8 +752,23 @@ def make_letter(profile, event):
             "trigger_event_id": event.get("id"), "persona_version": profile.get("version", 0), "source_ids": source_ids, "model": generated["model"]}
 
 
-def weekly_review(profile, events):
-    return make_letter(profile, {"kind": "weekly", "events": events or []})
+def weekly_review(profile, events, growth_context=None):
+    result = make_letter(profile, {"kind": "weekly", "events": events or []})
+    growth = growth_context or {}
+    experiment = growth.get("experiment")
+    active_week = growth.get("active_week")
+    evidence = growth.get("evidence") or []
+    if not experiment or not active_week:
+        result.update(growth_evidence_ids=[], next_week_proposal=None)
+        return result
+    confirmed_ids = [item["id"] for item in evidence if item.get("id") is not None]
+    if confirmed_ids:
+        facts = [f"[成长证据 #{item['id']}] {item.get('source_label') or item.get('kind') or '用户确认的证据'}" for item in evidence]
+        result["body"] += "\n\n本周成长依据：\n" + "\n".join(facts)
+    result["growth_evidence_ids"] = confirmed_ids
+    result["next_week_proposal"] = growth_weekly_draft(
+        profile, experiment, growth.get("capabilities") or [], evidence)
+    return result
 
 
 def decompose_goal(profile, goal):

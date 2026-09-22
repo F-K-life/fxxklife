@@ -303,6 +303,40 @@ class GrowthExperimentTests(unittest.TestCase):
         self.assertEqual(growth["evidence"][0]["id"], evidence["id"])
         self.assertNotIn("content", growth["evidence"][0])
 
+    def test_weekly_review_links_growth_facts_and_keeps_next_week_as_draft(self):
+        experiment, capabilities = self.confirmed_experiment()
+        active = self.activate_week(experiment, capabilities[0], "review-week").get_json()
+        evidence = self.api("/api/growth-evidence", {
+            "experiment_id": experiment["id"], "capability_id": capabilities[0]["id"],
+            "weekly_experiment_id": active["weekly_experiment"]["id"], "task_id": active["task"]["id"],
+            "kind": "reflection", "content": "我发现先写验证问题更容易开始。", "source_label": "本周练习反思",
+            "confirmed_by_user": True, "request_id": "review-evidence",
+        }).get_json()["evidence"]
+        before_weeks = self.sql("SELECT COUNT(*) AS n FROM weekly_experiments")[0]["n"]
+        draft = {
+            "hypothesis": "缩小验证范围会更容易获得反馈", "success_signal": "获得一次具体反馈",
+            "action": {"title": "做一次小范围验证", "first_step": "选择一位用户", "done_criteria": "记录反馈",
+                       "planned_minutes": 20, "capability_name": capabilities[0]["name"],
+                       "expected_evidence_kind": "reflection"},
+            "model": {"mode": "local", "label": "test", "available": False},
+        }
+        letter = {"title": "本周回顾", "body": "基于真实事实的回顾", "source_ids": [],
+                  "model": {"mode": "local", "label": "test", "available": False},
+                  "growth_evidence_ids": [evidence["id"]], "next_week_proposal": draft}
+        with patch("extras.modeling.weekly_review", return_value=letter) as mocked:
+            response = self.api("/api/reviews/weekly", {})
+        self.assertEqual(response.status_code, 200)
+        growth = mocked.call_args.args[2]
+        self.assertEqual(growth["experiment"]["id"], experiment["id"])
+        self.assertEqual(growth["active_week"]["id"], active["weekly_experiment"]["id"])
+        self.assertEqual(growth["evidence"][0]["id"], evidence["id"])
+        review = response.get_json()["review"]
+        self.assertEqual(review["experiment_id"], experiment["id"])
+        self.assertEqual(review["week_number"], 1)
+        self.assertEqual(review["stats"]["growth_evidence_ids"], [evidence["id"]])
+        self.assertEqual(review["stats"]["next_week_proposal"], draft)
+        self.assertEqual(self.sql("SELECT COUNT(*) AS n FROM weekly_experiments")[0]["n"], before_weeks)
+
 
 if __name__ == "__main__":
     unittest.main()
