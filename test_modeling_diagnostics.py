@@ -161,6 +161,37 @@ class ProviderDiagnosticsTests(unittest.TestCase):
         self.assertNotIn("sensitive upstream details", output)
         self.assertNotIn("user content", output)
 
+    def test_growth_capability_draft_has_three_to_seven_unique_items(self):
+        with patch.dict(os.environ, {"AI_API_KEY": "", "AI_MODEL": ""}):
+            result = modeling.growth_capability_draft(
+                {"ideal": "成为能交付产品的人", "current": "刚开始"},
+                {"future_identity": "AI 产品经理", "desired_outcome": "完成可测试作品"},
+            )
+        capabilities = result["capabilities"]
+        self.assertGreaterEqual(len(capabilities), 3)
+        self.assertLessEqual(len(capabilities), 7)
+        self.assertEqual(len({item["name"] for item in capabilities}), len(capabilities))
+        self.assertTrue(all(item["description"] and item["target_state"] for item in capabilities))
+
+    def test_growth_weekly_draft_has_one_bounded_action(self):
+        capabilities = [
+            {"name": "用户洞察", "description": "识别真实问题", "target_state": "完成访谈"}
+        ]
+        with patch.dict(os.environ, {"AI_API_KEY": "", "AI_MODEL": ""}):
+            result = modeling.growth_weekly_draft(
+                {"conditions": "每天二十分钟"},
+                {"future_identity": "AI 产品经理", "desired_outcome": "完成可测试作品"},
+                capabilities,
+                [],
+            )
+        self.assertTrue(result["hypothesis"])
+        self.assertTrue(result["success_signal"])
+        action = result["action"]
+        self.assertEqual(action["capability_name"], "用户洞察")
+        self.assertIn(action["expected_evidence_kind"], {"artifact", "answer", "link", "reflection"})
+        self.assertGreaterEqual(action["planned_minutes"], 1)
+        self.assertLessEqual(action["planned_minutes"], 180)
+
 
 if __name__ == "__main__":
     unittest.main()

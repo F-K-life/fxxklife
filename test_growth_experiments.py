@@ -156,6 +156,51 @@ class GrowthExperimentTests(unittest.TestCase):
         )
         self.assertEqual(foreign.status_code, 404)
 
+    def test_growth_draft_falls_back_without_persisting(self):
+        experiment = self.create_experiment().get_json()["experiment"]
+        before = {
+            "capabilities": self.sql("SELECT COUNT(*) AS n FROM capabilities")[0]["n"],
+            "weeks": self.sql("SELECT COUNT(*) AS n FROM weekly_experiments")[0]["n"],
+            "tasks": self.sql("SELECT COUNT(*) AS n FROM tasks")[0]["n"],
+        }
+        capability_draft = self.api(
+            f"/api/growth-experiments/{experiment['id']}/capability-draft", {}
+        )
+        self.assertEqual(capability_draft.status_code, 200)
+        proposed = capability_draft.get_json()["capabilities"]
+        self.assertGreaterEqual(len(proposed), 3)
+        self.assertEqual(
+            self.sql("SELECT COUNT(*) AS n FROM capabilities")[0]["n"],
+            before["capabilities"],
+        )
+
+        confirmed = self.api(
+            f"/api/growth-experiments/{experiment['id']}/capabilities/confirm",
+            {
+                "version": experiment["version"],
+                "request_id": "draft-test-confirm",
+                "capabilities": proposed[:3],
+            },
+        ).get_json()
+        counts_after_confirm = {
+            "weeks": self.sql("SELECT COUNT(*) AS n FROM weekly_experiments")[0]["n"],
+            "tasks": self.sql("SELECT COUNT(*) AS n FROM tasks")[0]["n"],
+        }
+        weekly_draft = self.api(
+            f"/api/growth-experiments/{experiment['id']}/weekly-draft", {}
+        )
+        self.assertEqual(weekly_draft.status_code, 200)
+        self.assertTrue(weekly_draft.get_json()["action"]["first_step"])
+        self.assertEqual(
+            self.sql("SELECT COUNT(*) AS n FROM weekly_experiments")[0]["n"],
+            counts_after_confirm["weeks"],
+        )
+        self.assertEqual(
+            self.sql("SELECT COUNT(*) AS n FROM tasks")[0]["n"],
+            counts_after_confirm["tasks"],
+        )
+        self.assertEqual(confirmed["experiment"]["status"], "draft")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,6 +5,8 @@ from datetime import date, timedelta
 
 from flask import abort, g, jsonify, request
 
+import modeling
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS growth_experiments (
@@ -89,6 +91,7 @@ def register_growth(app, services):
     db, row, rows = (services[key] for key in ("db", "row", "rows"))
     owned, auth, data = (services[key] for key in ("owned", "require_auth", "data"))
     text, number, now = (services[key] for key in ("text", "number", "now"))
+    get_profile, model_profile = (services[key] for key in ("get_profile", "model_profile"))
 
     with app.app_context():
         db().executescript(SCHEMA)
@@ -278,4 +281,41 @@ def register_growth(app, services):
             (g.user["id"], request_id, "confirm_capabilities", experiment_id, json.dumps(result, ensure_ascii=False)),
         )
         connection.commit()
+        return jsonify(result)
+
+    def generation_context(experiment_id):
+        experiment = owned("growth_experiments", experiment_id)
+        return experiment, get_profile()["version"], g.user["consent_version"]
+
+    def verify_context(experiment, profile_version, consent_version):
+        current = owned("growth_experiments", experiment["id"])
+        if (current["version"] != experiment["version"] or get_profile()["version"] != profile_version
+                or g.user["consent_version"] != consent_version):
+            abort(409, description="成长主题或授权刚有更新，请重新生成草案。")
+
+    @app.post("/api/growth-experiments/<int:experiment_id>/capability-draft")
+    @auth
+    def capability_draft(experiment_id):
+        experiment, profile_version, consent_version = generation_context(experiment_id)
+        result = modeling.growth_capability_draft(model_profile(), experiment)
+        verify_context(experiment, profile_version, consent_version)
+        return jsonify(result)
+
+    @app.post("/api/growth-experiments/<int:experiment_id>/weekly-draft")
+    @auth
+    def weekly_draft(experiment_id):
+        experiment, profile_version, consent_version = generation_context(experiment_id)
+        capabilities = rows(
+            "SELECT * FROM capabilities WHERE user_id=? AND experiment_id=? ORDER BY position",
+            (g.user["id"], experiment_id),
+        )
+        if not 3 <= len(capabilities) <= 7:
+            abort(409, description="请先确认 3 至 7 项能力。")
+        evidence = rows(
+            """SELECT * FROM growth_evidence WHERE user_id=? AND experiment_id=?
+               AND status='active' AND confirmed_by_user=1 ORDER BY id DESC LIMIT 10""",
+            (g.user["id"], experiment_id),
+        )
+        result = modeling.growth_weekly_draft(model_profile(), experiment, capabilities, evidence)
+        verify_context(experiment, profile_version, consent_version)
         return jsonify(result)

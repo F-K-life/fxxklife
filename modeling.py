@@ -444,6 +444,78 @@ def chat_reply(message, profile, memories, recent_messages, stats):
     return result
 
 
+def growth_capability_draft(profile, experiment):
+    """Propose editable capabilities; persistence always belongs to the caller."""
+    fallback = {"capabilities": [
+        {"name": "问题洞察", "description": "从真实情境中识别值得解决的问题。", "target_state": "完成至少三次有记录的用户访谈。"},
+        {"name": "快速原型", "description": "把假设转化为可以体验和讨论的方案。", "target_state": "完成一个可由真实用户测试的原型。"},
+        {"name": "证据复盘", "description": "依据行动结果调整判断和下一步。", "target_state": "连续完成每周证据回顾并做出调整。"},
+    ]}
+
+    def validate(value):
+        items = value.get("capabilities") if isinstance(value, dict) else None
+        if not isinstance(items, list) or not 3 <= len(items) <= 7:
+            raise ValueError("invalid_capability_count")
+        result, names = [], set()
+        for item in items:
+            if not isinstance(item, dict):
+                raise ValueError("invalid_capability")
+            name = _prose(item.get("name"), 80)
+            if name.casefold() in names:
+                raise ValueError("duplicate_capability")
+            names.add(name.casefold())
+            result.append({"name": name, "description": _prose(item.get("description"), 500),
+                           "target_state": _prose(item.get("target_state"), 500)})
+        return {"capabilities": result}
+
+    prompt = """为用户的12周成长实验提出3到7项可编辑能力草案。愿望不是事实，不声称用户已掌握能力。
+只输出JSON对象：capabilities数组；每项恰好包含name、description、target_state，且可由未来行动证据验证。"""
+    context = {"profile": _profile_context(profile or {}), "experiment": {
+        key: _text((experiment or {}).get(key), 1000) for key in ("future_identity", "desired_outcome")}}
+    return _generate(prompt, context, fallback, validate, 900)
+
+
+def growth_weekly_draft(profile, experiment, capabilities, evidence):
+    """Propose one weekly hypothesis and one editable action without persistence."""
+    first = (capabilities or [{"name": "持续练习"}])[0]
+    capability_name = _text(first.get("name"), 80) or "持续练习"
+    fallback = {
+        "hypothesis": f"如果我围绕“{capability_name}”完成一次小而真实的练习，就能发现下一步最需要改进的地方。",
+        "success_signal": "留下一个可回看的结果，并写下一条基于结果的调整。",
+        "action": {"title": f"完成一次{capability_name}小实验", "first_step": "先写下这次要验证的一个具体问题。",
+                   "done_criteria": "留下结果或反思证据，并能说出下一次要调整什么。", "planned_minutes": 20,
+                   "capability_name": capability_name, "expected_evidence_kind": "reflection"},
+    }
+
+    def validate(value):
+        action = value.get("action") if isinstance(value, dict) else None
+        if not isinstance(action, dict):
+            raise ValueError("invalid_weekly_draft")
+        minutes = action.get("planned_minutes")
+        if isinstance(minutes, bool) or not isinstance(minutes, int) or not 1 <= minutes <= 180:
+            raise ValueError("invalid_minutes")
+        kind = action.get("expected_evidence_kind")
+        if kind not in {"artifact", "answer", "link", "reflection"}:
+            raise ValueError("invalid_evidence_kind")
+        name = _prose(action.get("capability_name"), 80)
+        allowed = {_text(item.get("name"), 80) for item in capabilities or []}
+        if allowed and name not in allowed:
+            raise ValueError("unknown_capability")
+        return {"hypothesis": _prose(value.get("hypothesis"), 700),
+                "success_signal": _prose(value.get("success_signal"), 700),
+                "action": {"title": _prose(action.get("title"), 200),
+                           "first_step": _prose(action.get("first_step"), 300),
+                           "done_criteria": _prose(action.get("done_criteria"), 300),
+                           "planned_minutes": minutes, "capability_name": name,
+                           "expected_evidence_kind": kind}}
+
+    prompt = """提出本周唯一成长假设和一个可确认的小行动。只依据愿望与已确认事实，不把计划写成成就。
+只输出JSON对象，包含hypothesis、success_signal、action；action包含title、first_step、done_criteria、planned_minutes、capability_name、expected_evidence_kind。"""
+    context = {"profile": _profile_context(profile or {}), "experiment": experiment,
+               "capabilities": capabilities or [], "confirmed_recent_evidence": (evidence or [])[:10]}
+    return _generate(prompt, context, fallback, validate, 900)
+
+
 def onboarding_question(answers, step):
     """Zero-based step 0..4; only previous answers inform the current fixed goal."""
     if type(step) is not int or not 0 <= step <= 4:
