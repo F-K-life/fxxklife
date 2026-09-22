@@ -141,6 +141,20 @@ def register_growth(app, services):
 
     app.extensions["future_self_growth_snapshot"] = growth_snapshot
 
+    def model_context(uid):
+        experiment = row("SELECT id,title,future_identity,desired_outcome,current_week FROM growth_experiments WHERE user_id=? AND status='active'", (uid,))
+        if not experiment:
+            return {"experiment": None, "active_week": None, "capabilities": [], "evidence": []}
+        experiment_id = experiment["id"]
+        return {"experiment": experiment,
+                "active_week": row("SELECT id,week_number,hypothesis,success_signal FROM weekly_experiments WHERE user_id=? AND experiment_id=? AND status='active'", (uid, experiment_id)),
+                "capabilities": rows("SELECT id,name,status,target_state FROM capabilities WHERE user_id=? AND experiment_id=? ORDER BY position LIMIT 7", (uid, experiment_id)),
+                "evidence": rows("""SELECT id,capability_id,weekly_experiment_id,task_id,session_id,event_id,kind,source_label
+                                  FROM growth_evidence WHERE user_id=? AND experiment_id=? AND status='active'
+                                  AND confirmed_by_user=1 ORDER BY id DESC LIMIT 10""", (uid, experiment_id))}
+
+    app.extensions["future_self_growth_context"] = model_context
+
     def bounded(value, label, limit, required=True):
         if not isinstance(value, str) or len(value) > limit:
             abort(400, description=f"{label} 需要不超过 {limit} 字的文本。")

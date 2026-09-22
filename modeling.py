@@ -430,8 +430,9 @@ def chat_reply(message, profile, memories, recent_messages, stats):
                                   if key in {"id", "task_id", "status", "elapsed_seconds", "planned_minutes", "result"}},
                "feedback": [{"feedback": _text(item.get("feedback"), 100), "message_id": item.get("message_id")}
                             for item in (stats.get("feedback") or [])[-5:] if isinstance(item, dict)]
-                            if isinstance(stats.get("feedback"), list) else _text(stats.get("feedback"), 300)}
-    prompt = SYSTEM_PROMPT + "\nfeedback是用户已提交的交流反馈，最新的listen/dismiss_action表示先不建议；direct表示简短直接。当前用户明确改变要求时优先采用当前要求。correction未提供具体新内容时，邀请用户编辑画像，不杜撰修正。current_task/active_session是实际状态，不根据计时猜测任务完成。"
+                            if isinstance(stats.get("feedback"), list) else _text(stats.get("feedback"), 300),
+               "growth": stats.get("growth") or {}}
+    prompt = SYSTEM_PROMPT + "\nfeedback是用户已提交的交流反馈，最新的listen/dismiss_action表示先不建议；direct表示简短直接。当前用户明确改变要求时优先采用当前要求。correction未提供具体新内容时，邀请用户编辑画像，不杜撰修正。current_task/active_session是实际状态，不根据计时猜测任务完成。growth中的愿望用‘你希望’，计划用‘你准备’；只有带证据ID的记录才能表述为已发生进展。"
     def plain_reply(text):
         if not 1 <= len(text) <= 1800:
             raise ValueError("invalid_plain_reply")

@@ -2,6 +2,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app import create_app
 
@@ -285,6 +286,22 @@ class GrowthExperimentTests(unittest.TestCase):
             "confirmed_by_user": True, "request_id": "bad-source"})
         self.assertEqual(response.status_code, 400)
         self.assertEqual(self.sql("SELECT COUNT(*) AS n FROM growth_evidence")[0]["n"], 0)
+
+    def test_chat_context_contains_only_active_confirmed_growth_evidence(self):
+        experiment, capabilities = self.confirmed_experiment()
+        active = self.activate_week(experiment, capabilities[0], "context-week").get_json()
+        evidence = self.api("/api/growth-evidence", {"experiment_id": experiment["id"], "capability_id": capabilities[0]["id"],
+            "weekly_experiment_id": active["weekly_experiment"]["id"], "task_id": active["task"]["id"], "kind": "reflection",
+            "content": "有效证据正文不应完整进入上下文", "source_label": "练习一", "confirmed_by_user": True, "request_id": "context-evidence"}).get_json()["evidence"]
+        safe = {"reply_text": "继续按证据前进。", "intent": "listen", "action_suggestion": None, "evidence_ids": [],
+                "model": {"mode": "local", "label": "test", "available": False}}
+        with patch("app.modeling.chat_reply", return_value=safe) as mocked:
+            response = self.api("/api/chat", {"message": "我进展怎样", "request_id": "growth-context-chat"})
+        self.assertEqual(response.status_code, 200)
+        growth = mocked.call_args.args[4]["growth"]
+        self.assertEqual(growth["experiment"]["id"], experiment["id"])
+        self.assertEqual(growth["evidence"][0]["id"], evidence["id"])
+        self.assertNotIn("content", growth["evidence"][0])
 
 
 if __name__ == "__main__":

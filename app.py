@@ -802,6 +802,8 @@ def create_app(test_config=None):
         try:
             profile = profile_for_model()
             stats = get_state()['model'] if g.user['memory_enabled'] else {}
+            growth_context = app.extensions.get('future_self_growth_context')
+            stats['growth'] = growth_context(uid) if growth_context else {}
             active = row("SELECT * FROM focus_sessions WHERE user_id=? AND status!='ended'", (uid,))
             task_id = body.get('task_id') or (active['task_id'] if active else None)
             current_task = owned('tasks', task_id) if task_id else row("SELECT * FROM tasks WHERE user_id=? AND status='ready' ORDER BY id DESC LIMIT 1", (uid,))
