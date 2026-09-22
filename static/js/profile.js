@@ -32,7 +32,13 @@
     const retrieval=model.retrieval||{};
     $('model-explanation-body').innerHTML=`<p><strong>两项独立授权</strong><br>建档复用决定五问画像是否跨登录参与个性化；长期记忆决定是否从授权记录学习和检索。你单独编辑的字段是明确的手动设定，不受建档复用开关影响。本次会话确认的答案也可临时使用。</p><p><strong>当前选择</strong><br>建档复用${user.profile_reuse_enabled?'已开启':'已关闭'}；长期记忆${user.memory_enabled?'已开启':'已关闭'}。只有授权、已确认且来源仍有效的记忆，才进入稳定理解。</p><p><strong>节奏建议</strong><br>${escape(model.rhythm?.basis||'暂无足够行动样本。')} · ${Number(model.rhythm?.sample_count||0)} 个可用样本。时长不等于注意力，也不是人格分数。</p><p><strong>检索方式</strong><br>${escape(retrieval.method||'依据相关性检索已确认信息')} · 每次最多 ${Number(retrieval.limit||6)} 条。</p>${(model.dimensions||[]).map(d=>`<div class="model-evidence"><strong>${escape(d.label||fields[d.key]||d.key)}</strong> · ${escape(d.value||'尚未了解')}<small>来源：${escape(d.source||'你的自述')}</small></div>`).join('')}${(retrieval.items||[]).map(item=>`<div class="model-evidence">${escape(item.content)}<small>${escape(item.reason||'已确认来源')}</small><div class="evidence-links">${sourceLink(item)}</div></div>`).join('')}`;
     $('import-learning-note').textContent=user.memory_enabled?'资料授权后会提出候选；只有你确认的理解才参与后续对话。':'长期记忆当前关闭。资料可以保存并单独授权，但当前不进行记忆学习。';
-    renderMemories();renderPreferences();renderConflicts();if(historyLoaded)renderHistory();
+    renderGrowthMap();renderMemories();renderPreferences();renderConflicts();if(historyLoaded)renderHistory();
+  }
+  function renderGrowthMap(){
+    const growth=state.growth||{},experiment=growth.active_experiment,capabilities=growth.capabilities||[],evidence=growth.recent_evidence||[],labels={unverified:'待验证',practicing:'练习中',evidenced:'已有证据'};
+    $('growth-map-period').textContent=experiment?`第 ${growth.active_week?.week_number||experiment.current_week||1} 周`:'尚未建立主题';
+    $('growth-map-identity').textContent=experiment?`${experiment.title} · ${experiment.future_identity}`:'从真实行动和你确认的证据中，慢慢看见变化。';
+    $('growth-map-capabilities').innerHTML=capabilities.length?capabilities.map(capability=>{const sources=evidence.filter(item=>item.capability_id===capability.id);return `<article class="growth-capability-map"><div><h3>${escape(capability.name)}</h3><span class="growth-status ${escape(capability.status)}">${labels[capability.status]||'待验证'}</span></div><p>${escape(capability.target_state||'等待你定义目标状态')}</p><div class="growth-source-list">${sources.length?sources.map(item=>{const href=item.event_id?`/echoes?event=${encodeURIComponent(item.event_id)}`:item.task_id?`/focus?task=${encodeURIComponent(item.task_id)}`:'#';return `<a href="${href}">${escape(item.source_label||'成长证据')} ↗</a>`;}).join(''):'<span>还没有确认的作品或反思证据。</span>'}</div></article>`;}).join(''):'<p class="profile-empty-note">建立 12 周成长主题后，能力与证据会出现在这里。</p>';
   }
   function renderMemories(){
     const memories=state.memories.filter(item=>item.status!=='rejected');

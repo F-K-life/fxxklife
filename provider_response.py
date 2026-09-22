@@ -4,6 +4,26 @@ import json
 import re
 
 
+_PROTOCOL_FIELD = re.compile(
+    r'(?i)(?:^|[,{\s"])(reply_text|intent|action_suggestion|evidence_ids)\s*[":]'
+)
+
+
+def looks_structured(text):
+    """Return whether visible content resembles the application's JSON protocol."""
+    value = text.lstrip()
+    return value.startswith(('{', '[', '```')) or bool(_PROTOCOL_FIELD.search(value[:400]))
+
+
+def assistant_finish_reason(envelope):
+    """Normalize the first choice completion reason without trusting its shape."""
+    try:
+        value = envelope['choices'][0].get('finish_reason')
+        return value if isinstance(value, str) and value else 'unknown'
+    except (KeyError, IndexError, TypeError):
+        return 'unknown'
+
+
 def _content_text(content):
     if isinstance(content, str):
         return content
@@ -49,6 +69,8 @@ def assistant_json(envelope):
     """Return the first assistant JSON object across common compatible shapes."""
     try:
         message = envelope["choices"][0]["message"]
+        if not isinstance(message, dict):
+            raise ValueError("assistant message was not an object")
         content = message.get("content")
         text = _content_text(content)
         if not text:
@@ -62,6 +84,8 @@ def assistant_text(envelope):
     """Return visible assistant text from common compatible response shapes."""
     try:
         message = envelope["choices"][0]["message"]
+        if not isinstance(message, dict):
+            raise ValueError("assistant message was not an object")
         text = _content_text(message.get("content"))
         if not text:
             text = _content_text(message.get("reasoning_content"))

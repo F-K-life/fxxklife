@@ -1,0 +1,427 @@
+import sqlite3
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from app import create_app
+
+
+class GrowthExperimentTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.database = str(Path(self.directory.name) / "growth.db")
+        self.app = create_app(
+            {
+                "TESTING": True,
+                "DATABASE": self.database,
+                "SECRET_KEY": "growth-test-only",
+            }
+        )
+        self.client = self.app.test_client()
+        self.client.get("/login")
+        with self.client.session_transaction() as saved:
+            csrf = saved["csrf_token"]
+        self.assertEqual(
+            self.client.post("/demo", data={"csrf_token": csrf}).status_code,
+            302,
+        )
+        with self.client.session_transaction() as saved:
+            self.headers = {"X-CSRF-Token": saved["csrf_token"]}
+        self.user_id = self.client.get("/api/session").get_json()["user_id"]
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def api(self, path, body=None, method="POST"):
+        return self.client.open(path, method=method, json=body, headers=self.headers)
+
+    def sql(self, statement, args=()):
+        connection = sqlite3.connect(self.database)
+        connection.row_factory = sqlite3.Row
+        try:
+            return connection.execute(statement, args).fetchall()
+        finally:
+            connection.close()
+
+    def second_demo(self):
+        client = self.app.test_client()
+        client.get("/login")
+        with client.session_transaction() as saved:
+            csrf = saved["csrf_token"]
+        self.assertEqual(client.post("/demo", data={"csrf_token": csrf}).status_code, 302)
+        with client.session_transaction() as saved:
+            headers = {"X-CSRF-Token": saved["csrf_token"]}
+        return client, headers
+
+    def create_experiment(self, **changes):
+        body = {
+            "title": "成为能交付的 AI 产品经理",
+            "future_identity": "能把真实问题转化为可验证产品的人",
+            "desired_outcome": "完成一个可供真实用户试用的作品",
+        }
+        body.update(changes)
+        return self.api("/api/growth-experiments", body)
+
+    def confirmed_experiment(self, title="成长主题"):
+        experiment = self.create_experiment(title=title).get_json()["experiment"]
+        capabilities = [
+            {"name": f"能力{i}", "description": f"说明{i}", "target_state": f"目标{i}"}
+            for i in range(1, 4)
+        ]
+        result = self.api(
+            f"/api/growth-experiments/{experiment['id']}/capabilities/confirm",
+            {"version": experiment["version"], "request_id": f"caps-{experiment['id']}", "capabilities": capabilities},
+        ).get_json()
+        return result["experiment"], result["capabilities"]
+
+    def activate_week(self, experiment, capability, request_id="week-1"):
+        return self.api("/api/weekly-experiments/0", {
+            "experiment_id": experiment["id"], "experiment_version": experiment["version"],
+            "week_number": 1, "capability_id": capability["id"], "hypothesis": "一次真实练习能暴露关键差距",
+            "success_signal": "留下结果并写出下一次调整", "confirm_action": True, "request_id": request_id,
+            "action": {"title": "完成一次真实练习", "first_step": "写下要验证的问题", "done_criteria": "留下结果和调整",
+                       "planned_minutes": 20, "expected_evidence_kind": "reflection"}
+        }, method="PATCH")
+
+    def finish_task(self, task, prefix="focus"):
+        started = self.api("/api/focus/start", {"task_id": task["id"], "request_id": f"{prefix}-start"}).get_json()["session"]
+        self.api(f"/api/focus/{started['id']}", {"action": "end", "request_id": f"{prefix}-end"})
+        finished = self.api(f"/api/focus/{started['id']}", {
+            "action": "finish", "request_id": f"{prefix}-finish", "result": "completed", "reflection": "真实反思"
+        }).get_json()
+        return started, finished["event"]
+
+    def test_empty_growth_state_is_backward_compatible(self):
+        state = self.client.get("/api/state").get_json()
+        self.assertEqual(
+            state["growth"],
+            {
+                "active_experiment": None,
+                "capabilities": [],
+                "active_week": None,
+                "recent_evidence": [],
+            },
+        )
+
+    def test_experiment_creation_request_is_idempotent(self):
+        body = {"title": "retry-safe", "future_identity": "steady", "desired_outcome": "one result", "request_id": "create-once"}
+        first = self.api("/api/growth-experiments", body)
+        replay = self.api("/api/growth-experiments", body)
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(replay.get_json(), first.get_json())
+        self.assertEqual(self.sql("SELECT COUNT(*) AS n FROM growth_experiments WHERE title='retry-safe'")[0]["n"], 1)
+
+    def test_additive_migration_preserves_legacy_rows(self):
+        connection = sqlite3.connect(self.database)
+        try:
+            connection.execute(
+                """INSERT INTO tasks(user_id,title,first_step,done_criteria,planned_minutes,status,created_at)
+                   VALUES(?,?,?,?,?,'ready',?)""",
+                (self.user_id, "legacy task", "start", "done", 10, "2026-09-22T00:00:00Z"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        self.assertEqual(
+            self.sql("SELECT COUNT(*) AS n FROM tasks WHERE title=?", ("legacy task",))[0]["n"],
+            1,
+        )
+        columns = {row[1] for row in self.sql("PRAGMA table_info(tasks)")}
+        self.assertTrue(
+            {"experiment_id", "weekly_experiment_id", "capability_id"} <= columns
+        )
+
+    def test_additive_migration_upgrades_an_actual_legacy_tasks_table(self):
+        legacy_path = str(Path(self.directory.name) / "legacy.db")
+        connection = sqlite3.connect(legacy_path)
+        connection.execute("CREATE TABLE tasks (id INTEGER PRIMARY KEY,user_id INTEGER,title TEXT,first_step TEXT,done_criteria TEXT,planned_minutes INTEGER,status TEXT,created_at TEXT)")
+        connection.execute("INSERT INTO tasks VALUES(1,1,'legacy','start','done',10,'ready','2026-09-22')")
+        connection.commit()
+        connection.close()
+        create_app({"TESTING": True, "DATABASE": legacy_path, "SECRET_KEY": "legacy"})
+        connection = sqlite3.connect(legacy_path)
+        try:
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(tasks)")}
+            self.assertEqual(connection.execute("SELECT title FROM tasks WHERE id=1").fetchone()[0], "legacy")
+        finally:
+            connection.close()
+        self.assertTrue({"experiment_id", "weekly_experiment_id", "capability_id"} <= columns)
+
+    def test_capability_confirmation_validates_count_names_and_owner(self):
+        created = self.create_experiment()
+        self.assertEqual(created.status_code, 201)
+        experiment = created.get_json()["experiment"]
+        self.assertEqual(experiment["status"], "draft")
+
+        too_few = self.api(
+            f"/api/growth-experiments/{experiment['id']}/capabilities/confirm",
+            {
+                "version": experiment["version"],
+                "request_id": "caps-too-few",
+                "capabilities": [
+                    {"name": "洞察", "description": "识别问题", "target_state": "完成访谈"},
+                    {"name": "原型", "description": "快速表达", "target_state": "做出原型"},
+                ],
+            },
+        )
+        self.assertEqual(too_few.status_code, 400)
+
+        capabilities = [
+            {"name": "用户洞察", "description": "从事实识别问题", "target_state": "完成三次访谈"},
+            {"name": "产品原型", "description": "把假设变成界面", "target_state": "完成可测试原型"},
+            {"name": "结果复盘", "description": "依据证据调整", "target_state": "完成每周复盘"},
+        ]
+        body = {
+            "version": experiment["version"],
+            "request_id": "caps-confirm-1",
+            "capabilities": capabilities,
+        }
+        confirmed = self.api(
+            f"/api/growth-experiments/{experiment['id']}/capabilities/confirm", body
+        )
+        self.assertEqual(confirmed.status_code, 200)
+        payload = confirmed.get_json()
+        self.assertEqual(len(payload["capabilities"]), 3)
+        self.assertEqual(payload["experiment"]["status"], "draft")
+        self.assertEqual(
+            self.api(
+                f"/api/growth-experiments/{experiment['id']}/capabilities/confirm", body
+            ).get_json(),
+            payload,
+        )
+
+        stale = self.api(
+            f"/api/growth-experiments/{experiment['id']}/capabilities/confirm",
+            {**body, "request_id": "caps-stale"},
+        )
+        self.assertEqual(stale.status_code, 409)
+
+        duplicate = self.create_experiment(title="另一个草稿")
+        self.assertEqual(duplicate.status_code, 201)
+        self.assertEqual(duplicate.get_json()["experiment"]["status"], "draft")
+
+        stranger, stranger_headers = self.second_demo()
+        foreign = stranger.patch(
+            f"/api/growth-experiments/{experiment['id']}",
+            json={"title": "越权修改", "version": payload["experiment"]["version"]},
+            headers=stranger_headers,
+        )
+        self.assertEqual(foreign.status_code, 404)
+
+    def test_growth_draft_falls_back_without_persisting(self):
+        experiment = self.create_experiment().get_json()["experiment"]
+        before = {
+            "capabilities": self.sql("SELECT COUNT(*) AS n FROM capabilities")[0]["n"],
+            "weeks": self.sql("SELECT COUNT(*) AS n FROM weekly_experiments")[0]["n"],
+            "tasks": self.sql("SELECT COUNT(*) AS n FROM tasks")[0]["n"],
+        }
+        capability_draft = self.api(
+            f"/api/growth-experiments/{experiment['id']}/capability-draft", {}
+        )
+        self.assertEqual(capability_draft.status_code, 200)
+        proposed = capability_draft.get_json()["capabilities"]
+        self.assertGreaterEqual(len(proposed), 3)
+        self.assertEqual(
+            self.sql("SELECT COUNT(*) AS n FROM capabilities")[0]["n"],
+            before["capabilities"],
+        )
+
+        confirmed = self.api(
+            f"/api/growth-experiments/{experiment['id']}/capabilities/confirm",
+            {
+                "version": experiment["version"],
+                "request_id": "draft-test-confirm",
+                "capabilities": proposed[:3],
+            },
+        ).get_json()
+        counts_after_confirm = {
+            "weeks": self.sql("SELECT COUNT(*) AS n FROM weekly_experiments")[0]["n"],
+            "tasks": self.sql("SELECT COUNT(*) AS n FROM tasks")[0]["n"],
+        }
+        weekly_draft = self.api(
+            f"/api/growth-experiments/{experiment['id']}/weekly-draft", {}
+        )
+        self.assertEqual(weekly_draft.status_code, 200)
+        self.assertTrue(weekly_draft.get_json()["action"]["first_step"])
+        self.assertEqual(
+            self.sql("SELECT COUNT(*) AS n FROM weekly_experiments")[0]["n"],
+            counts_after_confirm["weeks"],
+        )
+        self.assertEqual(
+            self.sql("SELECT COUNT(*) AS n FROM tasks")[0]["n"],
+            counts_after_confirm["tasks"],
+        )
+        self.assertEqual(confirmed["experiment"]["status"], "draft")
+
+    def test_only_one_active_experiment_per_user(self):
+        first, first_caps = self.confirmed_experiment("主题一")
+        second, second_caps = self.confirmed_experiment("主题二")
+        activated = self.activate_week(first, first_caps[0], "activate-first")
+        self.assertEqual(activated.status_code, 200)
+        blocked = self.activate_week(second, second_caps[0], "activate-second")
+        self.assertEqual(blocked.status_code, 409)
+        self.assertEqual(self.sql("SELECT COUNT(*) AS n FROM growth_experiments WHERE status='active'")[0]["n"], 1)
+
+    def test_stale_version_returns_409_without_partial_writes(self):
+        experiment, capabilities = self.confirmed_experiment()
+        before = self.sql("SELECT COUNT(*) AS n FROM tasks")[0]["n"]
+        stale = dict(experiment, version=experiment["version"] - 1)
+        response = self.activate_week(stale, capabilities[0], "stale-week")
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.sql("SELECT COUNT(*) AS n FROM weekly_experiments")[0]["n"], 0)
+        self.assertEqual(self.sql("SELECT COUNT(*) AS n FROM tasks")[0]["n"], before)
+
+    def test_existing_week_rejects_stale_version_and_changed_week_number(self):
+        experiment, capabilities = self.confirmed_experiment()
+        active = self.activate_week(experiment, capabilities[0], "week-lock").get_json()
+        current_experiment = active["experiment"]
+        weekly = active["weekly_experiment"]
+        base = {
+            "experiment_id": current_experiment["id"], "experiment_version": current_experiment["version"],
+            "weekly_version": weekly["version"] - 1, "week_number": weekly["week_number"],
+            "capability_id": capabilities[0]["id"], "hypothesis": "changed", "success_signal": "changed",
+            "confirm_action": False, "request_id": "stale-existing-week",
+        }
+        self.assertEqual(self.api(f"/api/weekly-experiments/{weekly['id']}", base, method="PATCH").status_code, 409)
+        changed = {**base, "weekly_version": weekly["version"], "week_number": 2, "request_id": "changed-week-number"}
+        self.assertEqual(self.api(f"/api/weekly-experiments/{weekly['id']}", changed, method="PATCH").status_code, 400)
+        stored = self.sql("SELECT week_number,hypothesis,version FROM weekly_experiments WHERE id=?", (weekly["id"],))[0]
+        self.assertEqual((stored["week_number"], stored["hypothesis"], stored["version"]), (1, weekly["hypothesis"], weekly["version"]))
+
+    def test_week_confirmation_is_idempotent_and_links_task(self):
+        experiment, capabilities = self.confirmed_experiment()
+        first = self.activate_week(experiment, capabilities[0], "linked-week")
+        self.assertEqual(first.status_code, 200)
+        payload = first.get_json()
+        replay = self.activate_week(experiment, capabilities[0], "linked-week")
+        self.assertEqual(replay.get_json(), payload)
+        task = payload["task"]
+        self.assertEqual(task["experiment_id"], experiment["id"])
+        self.assertEqual(task["weekly_experiment_id"], payload["weekly_experiment"]["id"])
+        self.assertEqual(task["capability_id"], capabilities[0]["id"])
+        manual = self.api("/api/tasks", {
+            "title": "手动关联行动", "first_step": "开始", "done_criteria": "留下结果", "planned_minutes": 10,
+            "experiment_id": experiment["id"], "weekly_experiment_id": payload["weekly_experiment"]["id"],
+            "capability_id": capabilities[0]["id"]
+        })
+        self.assertEqual(manual.status_code, 201)
+        self.assertEqual(manual.get_json()["task"]["experiment_id"], experiment["id"])
+
+    def test_confirm_and_evidence_requests_are_idempotent(self):
+        experiment, capabilities = self.confirmed_experiment()
+        active = self.activate_week(experiment, capabilities[0], "evidence-week").get_json()
+        body = {"experiment_id": experiment["id"], "capability_id": capabilities[0]["id"],
+                "weekly_experiment_id": active["weekly_experiment"]["id"], "task_id": active["task"]["id"],
+                "kind": "reflection", "content": "我完成了练习并发现问题定义需要更具体。",
+                "source_label": "第一次真实练习", "confirmed_by_user": True, "request_id": "evidence-1"}
+        first = self.api("/api/growth-evidence", body)
+        self.assertEqual(first.status_code, 201)
+        replay = self.api("/api/growth-evidence", body)
+        self.assertEqual(replay.get_json(), first.get_json())
+        self.assertEqual(self.sql("SELECT COUNT(*) AS n FROM growth_evidence")[0]["n"], 1)
+        state = self.client.get("/api/state").get_json()
+        self.assertEqual(state["growth"]["capabilities"][0]["status"], "evidenced")
+
+    def test_evidence_requires_consistent_owned_sources(self):
+        experiment, capabilities = self.confirmed_experiment()
+        active = self.activate_week(experiment, capabilities[0], "invalid-source-week").get_json()
+        unrelated = self.api("/api/tasks", {"title": "无关任务", "first_step": "开始", "done_criteria": "结束", "planned_minutes": 5}).get_json()["task"]
+        response = self.api("/api/growth-evidence", {
+            "experiment_id": experiment["id"], "capability_id": capabilities[0]["id"],
+            "weekly_experiment_id": active["weekly_experiment"]["id"], "task_id": unrelated["id"],
+            "kind": "reflection", "content": "不应关联", "source_label": "错误来源",
+            "confirmed_by_user": True, "request_id": "bad-source"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.sql("SELECT COUNT(*) AS n FROM growth_evidence")[0]["n"], 0)
+
+        session, event = self.finish_task(unrelated, "unrelated")
+        inconsistent = self.api("/api/growth-evidence", {
+            "experiment_id": experiment["id"], "capability_id": capabilities[0]["id"],
+            "weekly_experiment_id": active["weekly_experiment"]["id"], "task_id": active["task"]["id"],
+            "session_id": session["id"], "event_id": event["id"], "kind": "reflection", "content": "still invalid",
+            "source_label": "mismatched chain", "confirmed_by_user": True, "request_id": "bad-source-chain"})
+        self.assertEqual(inconsistent.status_code, 400)
+        self.assertEqual(self.sql("SELECT COUNT(*) AS n FROM growth_evidence")[0]["n"], 0)
+
+    def test_source_change_marks_evidence_missing_and_excludes_context(self):
+        experiment, capabilities = self.confirmed_experiment()
+        active = self.activate_week(experiment, capabilities[0], "source-week").get_json()
+        session, event = self.finish_task(active["task"], "source")
+        created = self.api("/api/growth-evidence", {
+            "experiment_id": experiment["id"], "capability_id": capabilities[0]["id"],
+            "weekly_experiment_id": active["weekly_experiment"]["id"], "task_id": active["task"]["id"],
+            "session_id": session["id"], "event_id": event["id"], "kind": "reflection", "content": "original",
+            "source_label": "source event", "confirmed_by_user": True, "request_id": "source-evidence"}).get_json()
+        self.assertEqual(created["capability"]["status"], "evidenced")
+        corrected = self.api(f"/api/events/{event['id']}", {"result": "partial", "reflection": "corrected", "elapsed_seconds": 1}, method="PATCH")
+        self.assertEqual(corrected.status_code, 200)
+        stored = self.sql("SELECT status FROM growth_evidence WHERE id=?", (created["evidence"]["id"],))[0]
+        self.assertEqual(stored["status"], "source_missing")
+        state = self.client.get("/api/state").get_json()["growth"]
+        self.assertEqual(state["capabilities"][0]["status"], "practicing")
+        self.assertEqual(state["recent_evidence"], [])
+
+    def test_chat_context_contains_only_active_confirmed_growth_evidence(self):
+        experiment, capabilities = self.confirmed_experiment()
+        active = self.activate_week(experiment, capabilities[0], "context-week").get_json()
+        evidence = self.api("/api/growth-evidence", {"experiment_id": experiment["id"], "capability_id": capabilities[0]["id"],
+            "weekly_experiment_id": active["weekly_experiment"]["id"], "task_id": active["task"]["id"], "kind": "reflection",
+            "content": "有效证据正文不应完整进入上下文", "source_label": "练习一", "confirmed_by_user": True, "request_id": "context-evidence"}).get_json()["evidence"]
+        safe = {"reply_text": "继续按证据前进。", "intent": "listen", "action_suggestion": None, "evidence_ids": [],
+                "model": {"mode": "local", "label": "test", "available": False}}
+        with patch("app.modeling.chat_reply", return_value=safe) as mocked:
+            response = self.api("/api/chat", {"message": "我进展怎样", "request_id": "growth-context-chat"})
+        self.assertEqual(response.status_code, 200)
+        growth = mocked.call_args.args[4]["growth"]
+        self.assertEqual(growth["experiment"]["id"], experiment["id"])
+        self.assertEqual(growth["evidence"][0]["id"], evidence["id"])
+        self.assertNotIn("content", growth["evidence"][0])
+
+    def test_weekly_review_links_growth_facts_and_keeps_next_week_as_draft(self):
+        experiment, capabilities = self.confirmed_experiment()
+        active = self.activate_week(experiment, capabilities[0], "review-week").get_json()
+        evidence = self.api("/api/growth-evidence", {
+            "experiment_id": experiment["id"], "capability_id": capabilities[0]["id"],
+            "weekly_experiment_id": active["weekly_experiment"]["id"], "task_id": active["task"]["id"],
+            "kind": "reflection", "content": "我发现先写验证问题更容易开始。", "source_label": "本周练习反思",
+            "confirmed_by_user": True, "request_id": "review-evidence",
+        }).get_json()["evidence"]
+        before_weeks = self.sql("SELECT COUNT(*) AS n FROM weekly_experiments")[0]["n"]
+        draft = {
+            "hypothesis": "缩小验证范围会更容易获得反馈", "success_signal": "获得一次具体反馈",
+            "action": {"title": "做一次小范围验证", "first_step": "选择一位用户", "done_criteria": "记录反馈",
+                       "planned_minutes": 20, "capability_name": capabilities[0]["name"],
+                       "expected_evidence_kind": "reflection"},
+            "model": {"mode": "local", "label": "test", "available": False},
+        }
+        letter = {"title": "本周回顾", "body": "基于真实事实的回顾", "source_ids": [],
+                  "model": {"mode": "local", "label": "test", "available": False},
+                  "growth_evidence_ids": [evidence["id"]], "next_week_proposal": draft}
+        with patch("extras.modeling.weekly_review", return_value=letter) as mocked:
+            response = self.api("/api/reviews/weekly", {})
+        self.assertEqual(response.status_code, 200)
+        growth = mocked.call_args.args[2]
+        self.assertEqual(growth["experiment"]["id"], experiment["id"])
+        self.assertEqual(growth["active_week"]["id"], active["weekly_experiment"]["id"])
+        self.assertEqual(growth["evidence"][0]["id"], evidence["id"])
+        review = response.get_json()["review"]
+        self.assertEqual(review["experiment_id"], experiment["id"])
+        self.assertEqual(review["week_number"], 1)
+        self.assertEqual(review["stats"]["growth_evidence_ids"], [evidence["id"]])
+        self.assertEqual(review["stats"]["next_week_proposal"], draft)
+        self.assertEqual(self.sql("SELECT COUNT(*) AS n FROM weekly_experiments")[0]["n"], before_weeks)
+        current = self.client.get("/api/state").get_json()["growth"]
+        next_week = self.api("/api/weekly-experiments/0", {
+            "experiment_id": experiment["id"], "experiment_version": current["active_experiment"]["version"],
+            "week_number": 2, "capability_id": capabilities[0]["id"], "hypothesis": draft["hypothesis"],
+            "success_signal": draft["success_signal"], "confirm_action": True, "request_id": "confirm-next-week",
+            "action": draft["action"],
+        }, method="PATCH")
+        self.assertEqual(next_week.status_code, 200)
+        self.assertEqual(next_week.get_json()["weekly_experiment"]["week_number"], 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

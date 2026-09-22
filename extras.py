@@ -456,20 +456,28 @@ def register_extras(app, services):
         events = rows('SELECT * FROM events WHERE user_id=? AND created_at>=? AND created_at<? ORDER BY created_at', (uid, start, end))
         profile = model_profile()
         consent_version = g.user['consent_version']
-        result = modeling.weekly_review(profile, events)
+        growth_context = app.extensions.get('future_self_growth_context')
+        growth = growth_context(uid) if growth_context else {
+            'experiment': None, 'active_week': None, 'capabilities': [], 'evidence': []}
+        result = modeling.weekly_review(profile, events, growth)
         db().execute('BEGIN IMMEDIATE')
         fresh_user = row('SELECT * FROM users WHERE id=?', (uid,))
         if not fresh_user or fresh_user['consent_version'] != consent_version or (automatic and prefs(uid) != preference):
             db().rollback()
             return None
         current_events = rows('SELECT * FROM events WHERE user_id=? AND created_at>=? AND created_at<? ORDER BY created_at', (uid, start, end))
-        if events != current_events or get_profile()['version'] != profile['version']:
+        current_growth = growth_context(uid) if growth_context else growth
+        if events != current_events or current_growth != growth or get_profile()['version'] != profile['version']:
             db().rollback()
             return None
-        db().execute('INSERT INTO reviews(user_id,period_start,period_end,title,body,model,source_ids,profile_version,created_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,period_start,period_end) DO UPDATE SET title=excluded.title,body=excluded.body,model=excluded.model,source_ids=excluded.source_ids,profile_version=excluded.profile_version,source_adjusted=0',
-                     (uid, start_date.isoformat(), local_today.isoformat(), result['title'], result['body'], json.dumps(result.get('model', {}), ensure_ascii=False), json.dumps([e['id'] for e in events]), profile['version'], now()))
+        experiment = growth.get('experiment') or {}
+        active_week = growth.get('active_week') or {}
+        db().execute('INSERT INTO reviews(user_id,period_start,period_end,title,body,model,source_ids,profile_version,created_at,experiment_id,week_number) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,period_start,period_end) DO UPDATE SET title=excluded.title,body=excluded.body,model=excluded.model,source_ids=excluded.source_ids,profile_version=excluded.profile_version,source_adjusted=0,experiment_id=excluded.experiment_id,week_number=excluded.week_number',
+                     (uid, start_date.isoformat(), local_today.isoformat(), result['title'], result['body'], json.dumps(result.get('model', {}), ensure_ascii=False), json.dumps([e['id'] for e in events]), profile['version'], now(), experiment.get('id'), active_week.get('week_number')))
         stats = {'session_count':len(events), 'recorded_minutes':round(sum(e['elapsed_seconds'] for e in events)/60, 1),
-                 **{key+'_count':sum(e['result']==key for e in events) for key in ('completed','partial','stopped')}}
+                 **{key+'_count':sum(e['result']==key for e in events) for key in ('completed','partial','stopped')},
+                 'growth_evidence_ids': result.get('growth_evidence_ids', []),
+                 'next_week_proposal': result.get('next_week_proposal')}
         db().execute('UPDATE reviews SET stats=? WHERE user_id=? AND period_start=? AND period_end=?',
                      (json.dumps(stats), uid, start_date.isoformat(), local_today.isoformat()))
         db().commit()

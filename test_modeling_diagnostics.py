@@ -21,6 +21,92 @@ class ProviderDiagnosticsTests(unittest.TestCase):
         def read(self, _limit):
             return self.payload
 
+    @staticmethod
+    def _configured_provider():
+        return patch.dict(
+            os.environ,
+            {
+                "AI_BASE_URL": "https://provider.example/v1",
+                "AI_MODEL": "test-model",
+                "AI_API_KEY": "configured-test-key",
+            },
+        )
+
+    def test_truncated_protocol_never_becomes_plain_text(self):
+        broken = {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {"content": '{"reply_text":"不要显示我"'},
+                }
+            ]
+        }
+        with self._configured_provider(), patch(
+            "modeling.urllib.request.urlopen",
+            side_effect=[self._Response(broken), self._Response(broken)],
+        ):
+            result = modeling.chat_reply("你好", {"tone": "清晰"}, [], [], {"feedback": []})
+
+        self.assertEqual(result["model"]["mode"], "local")
+        self.assertNotIn("reply_text", result["reply_text"])
+        self.assertNotIn("不要显示我", result["reply_text"])
+
+    def test_length_finish_reason_requires_repair(self):
+        first = {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {
+                        "content": '{"reply_text":"看似完整","intent":"listen","action_suggestion":null,"evidence_ids":[]}'
+                    },
+                }
+            ]
+        }
+        second = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": '{"reply_text":"修复后的回答","intent":"listen","action_suggestion":null,"evidence_ids":[]}'
+                    },
+                }
+            ]
+        }
+        with self._configured_provider(), patch(
+            "modeling.urllib.request.urlopen",
+            side_effect=[self._Response(first), self._Response(second)],
+        ) as mocked:
+            result = modeling.chat_reply("你好", {"tone": "清晰"}, [], [], {"feedback": []})
+
+        self.assertEqual(mocked.call_count, 2)
+        self.assertEqual(result["reply_text"], "修复后的回答")
+
+    def test_second_invalid_protocol_uses_safe_local_fallback(self):
+        bad = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"content": '```json\n{"reply_text":'},
+                }
+            ]
+        }
+        with self._configured_provider(), patch(
+            "modeling.urllib.request.urlopen",
+            side_effect=[self._Response(bad), self._Response(bad)],
+        ):
+            with self.assertLogs("self_echo.modeling", level="WARNING") as logs:
+                result = modeling.chat_reply("你好", {"tone": "清晰"}, [], [], {"feedback": []})
+
+        self.assertEqual(result["model"]["mode"], "local")
+        self.assertIn("category=response_validation", "\n".join(logs.output))
+        self.assertNotIn("reply_text", result["reply_text"])
+
+    def test_null_provider_message_uses_safe_local_fallback(self):
+        envelope = {"choices": [{"finish_reason": "stop", "message": None}]}
+        with self._configured_provider(), patch("modeling.urllib.request.urlopen", return_value=self._Response(envelope)):
+            result = modeling.chat_reply("你好", {"tone": "清晰"}, [], [], {"feedback": []})
+        self.assertEqual(result["model"]["mode"], "local")
+
     def test_chat_reply_keeps_plain_text_from_compatible_provider(self):
         envelope = {
             "choices": [{"message": {"content": "这是模型生成的一句话。"}}]
@@ -80,6 +166,37 @@ class ProviderDiagnosticsTests(unittest.TestCase):
         self.assertNotIn(api_key, output)
         self.assertNotIn("sensitive upstream details", output)
         self.assertNotIn("user content", output)
+
+    def test_growth_capability_draft_has_three_to_seven_unique_items(self):
+        with patch.dict(os.environ, {"AI_API_KEY": "", "AI_MODEL": ""}):
+            result = modeling.growth_capability_draft(
+                {"ideal": "成为能交付产品的人", "current": "刚开始"},
+                {"future_identity": "AI 产品经理", "desired_outcome": "完成可测试作品"},
+            )
+        capabilities = result["capabilities"]
+        self.assertGreaterEqual(len(capabilities), 3)
+        self.assertLessEqual(len(capabilities), 7)
+        self.assertEqual(len({item["name"] for item in capabilities}), len(capabilities))
+        self.assertTrue(all(item["description"] and item["target_state"] for item in capabilities))
+
+    def test_growth_weekly_draft_has_one_bounded_action(self):
+        capabilities = [
+            {"name": "用户洞察", "description": "识别真实问题", "target_state": "完成访谈"}
+        ]
+        with patch.dict(os.environ, {"AI_API_KEY": "", "AI_MODEL": ""}):
+            result = modeling.growth_weekly_draft(
+                {"conditions": "每天二十分钟"},
+                {"future_identity": "AI 产品经理", "desired_outcome": "完成可测试作品"},
+                capabilities,
+                [],
+            )
+        self.assertTrue(result["hypothesis"])
+        self.assertTrue(result["success_signal"])
+        action = result["action"]
+        self.assertEqual(action["capability_name"], "用户洞察")
+        self.assertIn(action["expected_evidence_kind"], {"artifact", "answer", "link", "reflection"})
+        self.assertGreaterEqual(action["planned_minutes"], 1)
+        self.assertLessEqual(action["planned_minutes"], 180)
 
 
 if __name__ == "__main__":

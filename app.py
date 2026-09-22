@@ -532,6 +532,9 @@ def create_app(test_config=None):
                 db().execute("UPDATE memories SET status='revoked' WHERE id=?", (item['id'],))
         db().execute("UPDATE jobs SET status='cancelled',payload='{}',updated_at=? WHERE user_id=? AND source_type=? AND source_id=? AND status IN ('pending','running')",
                      (now(), g.user['id'], source_type, source_id))
+        growth_invalidator = app.extensions.get('future_self_growth_invalidate_source')
+        if growth_invalidator:
+            growth_invalidator(g.user['id'], source_type, source_id)
 
     def run_jobs(limit=20, user_id=None):
         processed = 0
@@ -675,6 +678,7 @@ def create_app(test_config=None):
         messages = [message_data(message, feedback_rows) for message in messages]
         model = modeling.build_model(profile_for_model(), confirmed_memories(), sessions, bool(g.user['memory_enabled']))
         model['pending_count'] = row("SELECT COUNT(*) AS n FROM memories WHERE user_id=? AND status='candidate'", (uid,))['n']
+        growth_snapshot = app.extensions.get('future_self_growth_snapshot')
         return dict(user=user_public(g.user), profile=profile, model_profile=profile_for_model(), answers=answers,
             tasks=rows('SELECT * FROM tasks WHERE user_id=? ORDER BY id DESC LIMIT 500', (uid,)), sessions=sessions,
             active_session=next((item for item in sessions if item['status'] != 'ended'), None),
@@ -684,6 +688,7 @@ def create_app(test_config=None):
             milestones=rows('SELECT * FROM milestones WHERE user_id=? ORDER BY date,id', (uid,)),
             jobs=rows('SELECT id,kind,source_type,source_id,status,attempts,last_error,created_at,updated_at FROM jobs WHERE user_id=? ORDER BY id DESC LIMIT 40', (uid,)),
             model=model,
+            growth=growth_snapshot(uid) if growth_snapshot else {'active_experiment': None, 'capabilities': [], 'active_week': None, 'recent_evidence': []},
             server_time=time.time())
 
     @app.get('/api/state')
@@ -800,6 +805,9 @@ def create_app(test_config=None):
         try:
             profile = profile_for_model()
             stats = get_state()['model'] if g.user['memory_enabled'] else {}
+            growth_context = app.extensions.get('future_self_growth_context')
+            growth_generation_context = growth_context(uid) if growth_context else {}
+            stats['growth'] = growth_generation_context
             active = row("SELECT * FROM focus_sessions WHERE user_id=? AND status!='ended'", (uid,))
             task_id = body.get('task_id') or (active['task_id'] if active else None)
             current_task = owned('tasks', task_id) if task_id else row("SELECT * FROM tasks WHERE user_id=? AND status='ready' ORDER BY id DESC LIMIT 1", (uid,))
@@ -825,7 +833,10 @@ def create_app(test_config=None):
             if not current or current['auth_version'] != session.get('auth_version') or not row("SELECT user_id FROM chat_requests WHERE user_id=? AND request_id=? AND status='pending'", (uid, key)):
                 raise ValueError('source deleted')
             g.user = current
-            if current['memory_enabled'] != memory_enabled or current['consent_version'] != consent_version or profile_for_model() != profile or confirmed_memories() != memories:
+            current_growth_context = growth_context(uid) if growth_context else {}
+            if (current['memory_enabled'] != memory_enabled or current['consent_version'] != consent_version
+                    or profile_for_model() != profile or confirmed_memories() != memories
+                    or current_growth_context != growth_generation_context):
                 raise ValueError('context changed during generation')
             metadata = {key: result.get(key) for key in ('intent', 'action_suggestion', 'evidence_ids', 'model')}
             metadata['persona_version'] = profile['version']
@@ -873,10 +884,18 @@ def create_app(test_config=None):
             owned('messages', number(body, 'source_message_id'))
         goal_id = nullable_owner(body, 'goal_id', 'goals')
         milestone_id = nullable_owner(body, 'milestone_id', 'milestones')
+        experiment_id = nullable_owner(body, 'experiment_id', 'growth_experiments')
+        weekly_experiment_id = nullable_owner(body, 'weekly_experiment_id', 'weekly_experiments')
+        capability_id = nullable_owner(body, 'capability_id', 'capabilities')
         if milestone_id and goal_id and owned('milestones', milestone_id).get('goal_id') not in (None, goal_id):
             abort(400, description='里程碑与目标不匹配。')
-        tid = db().execute('INSERT INTO tasks(user_id,title,first_step,done_criteria,planned_minutes,source_message_id,created_at,goal_id,milestone_id) VALUES(?,?,?,?,?,?,?,?,?)',
-                           (g.user['id'], *values, minutes, source_id, now(), goal_id, milestone_id)).lastrowid
+        for linked_id, table in ((weekly_experiment_id, 'weekly_experiments'), (capability_id, 'capabilities')):
+            if linked_id and owned(table, linked_id)['experiment_id'] != experiment_id:
+                abort(400, description='成长行动关联不一致。')
+        tid = db().execute('''INSERT INTO tasks(user_id,title,first_step,done_criteria,planned_minutes,source_message_id,created_at,
+                           goal_id,milestone_id,experiment_id,weekly_experiment_id,capability_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''',
+                           (g.user['id'], *values, minutes, source_id, now(), goal_id, milestone_id,
+                            experiment_id, weekly_experiment_id, capability_id)).lastrowid
         db().commit()
         return jsonify(task=owned('tasks', tid)), 201
 
@@ -1228,7 +1247,8 @@ def create_app(test_config=None):
     def export_account():
         uid = g.user['id']
         exported = {'exported_at': now(), 'user': user_public(g.user), 'profile': get_profile()}
-        for table in ('messages', 'tasks', 'focus_sessions', 'events', 'letters', 'memories', 'milestones'):
+        for table in ('messages', 'tasks', 'focus_sessions', 'events', 'letters', 'memories', 'milestones',
+                      'growth_experiments', 'capabilities', 'weekly_experiments', 'growth_evidence'):
             exported[table] = rows(f'SELECT * FROM {table} WHERE user_id=? ORDER BY id', (uid,))
         exported['focus_intervals'] = rows('SELECT i.* FROM focus_intervals i JOIN focus_sessions s ON s.id=i.session_id WHERE s.user_id=? ORDER BY i.id', (uid,))
         response = jsonify(exported)
@@ -1248,6 +1268,11 @@ def create_app(test_config=None):
                          'get_profile': get_profile, 'model_profile': profile_for_model,
                          'invalidate_source': invalidate_source, 'now': now, 'queue_job': queue_job,
                          'confirmed_memories': confirmed_memories})
+    from growth import register_growth
+    register_growth(app, {'db': db, 'row': row, 'rows': rows, 'owned': owned, 'require_auth': require_auth,
+                          'data': data, 'text': text, 'number': number, 'boolean': boolean,
+                          'nullable_owner': nullable_owner, 'get_profile': get_profile,
+                          'model_profile': profile_for_model, 'now': now})
     if not app.config.get('TESTING'):
         def worker():
             while True:

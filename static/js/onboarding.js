@@ -1,6 +1,6 @@
 (() => {
   const questions=[
-    {category:'YOUR IDEAL SELF',title:'一年后的你，最希望哪里不一样？',hint:'可以是一件想做到的事，也可以是一种想拥有的状态。',examples:['做事更从容一些','能自信地用英语交流','找到真正想做的事']},
+    {category:'THE PERSON YOU ARE BECOMING',title:'你希望未来的自己，成为一个怎样的人？',hint:'可以说说你期待的性格、生活状态、能力或关系，不必一次想完整。',examples:['更从容、坚定，也懂得照顾自己','有能力做喜欢的事，也珍惜重要的人','更接近真实的自己']},
     {category:'WHAT MATTERS TO YOU',title:'为什么，这件事对你很重要？',hint:'也想听听，有什么是你不愿为了进步而牺牲的。',examples:['想拥有更多选择','希望留出陪伴家人的时间','不想以透支自己为代价']},
     {category:'WHERE YOU ARE NOW',title:'最近，你最想推进哪一件事？',hint:'通常卡在哪一步？说说具体的一刻，就够了。',examples:['想学英语，总觉得一小时太长','项目很想做，却不知道从哪下手','总在等待一个完美的开始']},
     {category:'FIND YOUR OWN RHYTHM',title:'什么，曾经帮助过你开始？',hint:'想想一次还不错的经历。现在，你愿意为一件事留出多久？',examples:['目标小一点，先做 10 分钟','安静的环境让我更容易投入','先列出一个具体的第一步']},
