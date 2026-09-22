@@ -19,7 +19,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from provider_tls import request_headers, secure_context
-from provider_response import assistant_json, assistant_text
+from provider_response import assistant_finish_reason, assistant_json, assistant_text, looks_structured
 
 
 logger = logging.getLogger("self_echo.modeling")
@@ -215,15 +215,17 @@ def _generate(prompt, context, fallback, validate, max_tokens=1200, plain_text=N
                 raise ValueError("response_limit")
             try:
                 envelope = json.loads(raw)
-                result = validate(assistant_json(envelope))
+                visible = assistant_text(envelope)
+                if assistant_finish_reason(envelope) == "length":
+                    raise ValueError("truncated_response")
+                try:
+                    result = validate(assistant_json(envelope))
+                except (ValueError, TypeError, KeyError, IndexError):
+                    if plain_text is None or looks_structured(visible):
+                        raise ValueError("invalid_schema")
+                    result = plain_text(visible)
                 return {**result, "model": _model_meta()}
             except (ValueError, TypeError, KeyError, IndexError):
-                if plain_text is not None and envelope is not None:
-                    try:
-                        result = plain_text(assistant_text(envelope))
-                        return {**result, "model": _model_meta()}
-                    except (ValueError, TypeError, KeyError, IndexError):
-                        pass
                 if attempt:
                     raise ValueError("invalid_schema")
                 messages.append({"role": "user", "content": "上次输出未通过结构或来源校验。请重新严格按最初的 JSON 协议回答；只引用本次数据中的来源，不添加额外字段。"})
