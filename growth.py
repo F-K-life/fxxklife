@@ -120,6 +120,19 @@ def register_growth(app, services):
                 "recent_evidence": [],
             }
         experiment_id = experiment["id"]
+        evidence_rows = rows(
+            """SELECT * FROM growth_evidence
+               WHERE user_id=? AND experiment_id=? AND status='active' AND confirmed_by_user=1
+               ORDER BY id DESC""",
+            (uid, experiment_id),
+        )
+        evidence_counts = {}
+        visible_evidence = []
+        for item in evidence_rows:
+            capability_id = item["capability_id"]
+            evidence_counts[capability_id] = evidence_counts.get(capability_id, 0) + 1
+            if evidence_counts[capability_id] <= 3:
+                visible_evidence.append(item)
         return {
             "active_experiment": experiment,
             "capabilities": rows(
@@ -131,12 +144,7 @@ def register_growth(app, services):
                    WHERE user_id=? AND experiment_id=? AND status='active' ORDER BY week_number DESC LIMIT 1""",
                 (uid, experiment_id),
             ),
-            "recent_evidence": rows(
-                """SELECT * FROM growth_evidence
-                   WHERE user_id=? AND experiment_id=? AND status='active' AND confirmed_by_user=1
-                   ORDER BY id DESC LIMIT 10""",
-                (uid, experiment_id),
-            ),
+            "recent_evidence": visible_evidence,
         }
 
     app.extensions["future_self_growth_snapshot"] = growth_snapshot
@@ -174,9 +182,20 @@ def register_growth(app, services):
                 )
             )
         body = data()
+        request_id = text(body, "request_id", 100)
+        connection = db()
+        if request_id:
+            connection.execute("BEGIN IMMEDIATE")
+            repeated = row("SELECT result,action FROM growth_actions WHERE user_id=? AND request_id=?", (g.user["id"], request_id))
+            if repeated:
+                if repeated["action"] != "create_experiment":
+                    connection.rollback()
+                    abort(409, description="请求标识已用于其他操作。")
+                connection.commit()
+                return jsonify(json.loads(repeated["result"])), 201
         start = date.today()
         stamp = now()
-        experiment_id = db().execute(
+        experiment_id = connection.execute(
             """INSERT INTO growth_experiments(
                  user_id,title,future_identity,desired_outcome,start_date,end_date,created_at,updated_at)
                VALUES(?,?,?,?,?,?,?,?)""",
@@ -191,12 +210,17 @@ def register_growth(app, services):
                 stamp,
             ),
         ).lastrowid
-        db().commit()
-        return jsonify(experiment=owned("growth_experiments", experiment_id)), 201
+        result = {"experiment": row("SELECT * FROM growth_experiments WHERE id=?", (experiment_id,))}
+        if request_id:
+            connection.execute("INSERT INTO growth_actions VALUES(?,?,?,?,?)", (g.user["id"], request_id, "create_experiment", experiment_id, json.dumps(result, ensure_ascii=False)))
+        connection.commit()
+        return jsonify(result), 201
 
     @app.patch("/api/growth-experiments/<int:experiment_id>")
     @auth
     def update_growth_experiment(experiment_id):
+        connection = db()
+        connection.execute("BEGIN IMMEDIATE")
         experiment = owned("growth_experiments", experiment_id)
         body = data()
         if number(body, "version") != experiment["version"]:
@@ -204,9 +228,9 @@ def register_growth(app, services):
         status = body.get("status", experiment["status"])
         if status not in ("draft", "paused", "completed") and status != experiment["status"]:
             abort(400, description="请通过确认周实验来激活成长主题。")
-        db().execute(
+        updated = connection.execute(
             """UPDATE growth_experiments SET title=?,future_identity=?,desired_outcome=?,
-               status=?,version=version+1,updated_at=? WHERE id=? AND user_id=?""",
+               status=?,version=version+1,updated_at=? WHERE id=? AND user_id=? AND version=?""",
             (
                 text(body, "title", 160, True, experiment["title"]),
                 text(body, "future_identity", 1000, True, experiment["future_identity"]),
@@ -215,9 +239,13 @@ def register_growth(app, services):
                 now(),
                 experiment_id,
                 g.user["id"],
+                experiment["version"],
             ),
         )
-        db().commit()
+        if updated.rowcount != 1:
+            connection.rollback()
+            abort(409, description="成长主题刚有更新，请刷新后重试。")
+        connection.commit()
         return jsonify(experiment=owned("growth_experiments", experiment_id))
 
     @app.post("/api/growth-experiments/<int:experiment_id>/capabilities/confirm")
@@ -303,8 +331,9 @@ def register_growth(app, services):
 
     def verify_context(experiment, profile_version, consent_version):
         current = owned("growth_experiments", experiment["id"])
+        fresh_user = row("SELECT consent_version FROM users WHERE id=?", (g.user["id"],))
         if (current["version"] != experiment["version"] or get_profile()["version"] != profile_version
-                or g.user["consent_version"] != consent_version):
+                or not fresh_user or fresh_user["consent_version"] != consent_version):
             abort(409, description="成长主题或授权刚有更新，请重新生成草案。")
 
     @app.post("/api/growth-experiments/<int:experiment_id>/capability-draft")
@@ -330,8 +359,14 @@ def register_growth(app, services):
                AND status='active' AND confirmed_by_user=1 ORDER BY id DESC LIMIT 10""",
             (g.user["id"], experiment_id),
         )
+        context_token = json.dumps({"capabilities": capabilities, "evidence": evidence}, ensure_ascii=False, sort_keys=True)
         result = modeling.growth_weekly_draft(model_profile(), experiment, capabilities, evidence)
         verify_context(experiment, profile_version, consent_version)
+        current_capabilities = rows("SELECT * FROM capabilities WHERE user_id=? AND experiment_id=? ORDER BY position", (g.user["id"], experiment_id))
+        current_evidence = rows("""SELECT * FROM growth_evidence WHERE user_id=? AND experiment_id=?
+                                 AND status='active' AND confirmed_by_user=1 ORDER BY id DESC LIMIT 10""", (g.user["id"], experiment_id))
+        if json.dumps({"capabilities": current_capabilities, "evidence": current_evidence}, ensure_ascii=False, sort_keys=True) != context_token:
+            abort(409, description="成长证据刚有更新，请重新生成草案。")
         return jsonify(result)
 
     @app.patch("/api/weekly-experiments/<int:weekly_id>")
@@ -363,17 +398,39 @@ def register_growth(app, services):
             connection.rollback()
             abort(400, description="能力与成长主题不匹配。")
         week_number = number(body, "week_number", 1, 12)
+        if not weekly_id:
+            expected_week = 1 if experiment["status"] == "draft" else experiment["current_week"] + 1
+            if week_number != expected_week or expected_week > 12:
+                connection.rollback()
+                abort(400, description="请按顺序确认下一周实验。")
         stamp = now()
-        connection.execute("UPDATE weekly_experiments SET status='ready_for_review',version=version+1,updated_at=? WHERE user_id=? AND experiment_id=? AND status='active'",
-                           (stamp, g.user["id"], experiment["id"]))
         if weekly_id:
             weekly = owned("weekly_experiments", weekly_id)
             if weekly["experiment_id"] != experiment["id"]:
                 connection.rollback()
                 abort(400, description="周实验与成长主题不匹配。")
-            connection.execute("UPDATE weekly_experiments SET hypothesis=?,success_signal=?,status='active',version=version+1,updated_at=? WHERE id=?",
-                               (text(body, "hypothesis", 700, True), text(body, "success_signal", 700, True), stamp, weekly_id))
+            weekly_version = body.get("weekly_version")
+            if isinstance(weekly_version, bool) or not isinstance(weekly_version, int):
+                connection.rollback()
+                abort(400, description="请提供有效的本周版本。")
+            if weekly_version != weekly["version"]:
+                connection.rollback()
+                abort(409, description="本周实验刚有更新，请刷新后确认。")
+            if week_number != weekly["week_number"]:
+                connection.rollback()
+                abort(400, description="已建立的周次不能修改。")
+            if weekly["status"] != "active":
+                connection.rollback()
+                abort(409, description="只能编辑当前进行中的周实验。")
+            updated = connection.execute("""UPDATE weekly_experiments SET hypothesis=?,success_signal=?,status='active',version=version+1,updated_at=?
+                                            WHERE id=? AND user_id=? AND version=?""",
+                               (text(body, "hypothesis", 700, True), text(body, "success_signal", 700, True), stamp, weekly_id, g.user["id"], weekly["version"]))
+            if updated.rowcount != 1:
+                connection.rollback()
+                abort(409, description="本周实验刚有更新，请刷新后确认。")
         else:
+            connection.execute("UPDATE weekly_experiments SET status='ready_for_review',version=version+1,updated_at=? WHERE user_id=? AND experiment_id=? AND status='active'",
+                               (stamp, g.user["id"], experiment["id"]))
             weekly_id = connection.execute(
                 """INSERT INTO weekly_experiments(user_id,experiment_id,week_number,hypothesis,success_signal,status,created_at,updated_at)
                    VALUES(?,?,?,?,?,'active',?,?)""",
@@ -398,8 +455,12 @@ def register_growth(app, services):
                  minutes, stamp, experiment["id"], weekly_id, capability["id"]),
             ).lastrowid
             task = row("SELECT * FROM tasks WHERE id=?", (task_id,))
-        connection.execute("UPDATE growth_experiments SET status='active',current_week=?,version=version+1,updated_at=? WHERE id=?",
-                           (week_number, stamp, experiment["id"]))
+        updated_experiment = connection.execute("""UPDATE growth_experiments SET status='active',current_week=?,version=version+1,updated_at=?
+                                                  WHERE id=? AND user_id=? AND version=?""",
+                           (week_number, stamp, experiment["id"], g.user["id"], experiment["version"]))
+        if updated_experiment.rowcount != 1:
+            connection.rollback()
+            abort(409, description="成长主题刚有更新，请刷新后确认。")
         connection.execute("UPDATE capabilities SET status='practicing',version=version+1,updated_at=? WHERE id=? AND status='unverified'",
                            (stamp, capability["id"]))
         result = {"experiment": row("SELECT * FROM growth_experiments WHERE id=?", (experiment["id"],)),
@@ -409,12 +470,28 @@ def register_growth(app, services):
         connection.commit()
         return jsonify(result)
 
-    def refresh_capability_status(capability_id):
+    def refresh_capability_status(capability_id, uid=None):
+        uid = uid or g.user["id"]
         supported = row("""SELECT id FROM growth_evidence WHERE user_id=? AND capability_id=?
                            AND status='active' AND confirmed_by_user=1 LIMIT 1""",
-                        (g.user["id"], capability_id))
+                        (uid, capability_id))
         db().execute("UPDATE capabilities SET status=?,version=version+1,updated_at=? WHERE id=? AND user_id=?",
-                     ("evidenced" if supported else "practicing", now(), capability_id, g.user["id"]))
+                     ("evidenced" if supported else "practicing", now(), capability_id, uid))
+
+    def invalidate_growth_source(uid, source_type, source_id):
+        if source_type != "reflection":
+            return
+        affected = rows("SELECT id,capability_id,experiment_id FROM growth_evidence WHERE user_id=? AND event_id=? AND status='active'", (uid, source_id))
+        if not affected:
+            return
+        db().execute("UPDATE growth_evidence SET status='source_missing',updated_at=? WHERE user_id=? AND event_id=? AND status='active'", (now(), uid, source_id))
+        for capability_id in {item["capability_id"] for item in affected}:
+            refresh_capability_status(capability_id, uid)
+        experiment_ids = {item["experiment_id"] for item in affected}
+        for experiment_id in experiment_ids:
+            db().execute("UPDATE reviews SET source_adjusted=1 WHERE user_id=? AND experiment_id=?", (uid, experiment_id))
+
+    app.extensions["future_self_growth_invalidate_source"] = invalidate_growth_source
 
     @app.post("/api/growth-evidence")
     @auth
@@ -441,6 +518,20 @@ def register_growth(app, services):
             if body.get(key) is not None:
                 sources[key] = owned(table, number(body, key))
         task = sources.get("task_id")
+        session_source = sources.get("session_id")
+        event_source = sources.get("event_id")
+        if event_source:
+            event_session = owned("focus_sessions", event_source["session_id"])
+            if session_source and session_source["id"] != event_session["id"]:
+                connection.rollback()
+                abort(400, description="证据事件与沉浸记录不匹配。")
+            session_source = event_session
+        if session_source:
+            session_task = owned("tasks", session_source["task_id"])
+            if task and task["id"] != session_task["id"]:
+                connection.rollback()
+                abort(400, description="证据沉浸记录与行动不匹配。")
+            task = session_task
         if task and (task.get("experiment_id") != experiment["id"] or task.get("weekly_experiment_id") != weekly["id"]
                      or task.get("capability_id") != capability["id"]):
             connection.rollback()
@@ -474,6 +565,8 @@ def register_growth(app, services):
         status = body.get("status", evidence["status"])
         if status not in ("active", "revoked"):
             abort(400, description="证据状态未识别。")
+        if evidence["status"] == "source_missing" and status == "active":
+            abort(409, description="证据来源已变化，请从新的真实记录重新确认。")
         db().execute("UPDATE growth_evidence SET status=?,content=?,source_label=?,updated_at=? WHERE id=?",
                      (status, text(body, "content", 5000, True, evidence["content"]),
                       text(body, "source_label", 200, True, evidence["source_label"]), now(), evidence_id))

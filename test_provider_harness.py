@@ -2,7 +2,7 @@ import unittest
 
 import provider_harness
 import provider_tls
-from provider_response import assistant_finish_reason, looks_structured
+from provider_response import assistant_finish_reason, assistant_text, looks_structured
 
 
 class ProviderHarnessTests(unittest.TestCase):
@@ -66,6 +66,15 @@ class ProviderHarnessTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "protocol response"):
             provider_harness.parse_protocol_response({"choices": []})
+
+    def test_null_or_wrongly_typed_messages_are_validation_errors(self):
+        for envelope in (
+            {"choices": [{"message": None}]},
+            {"choices": [{"message": "not-an-object"}]},
+            {"choices": "not-a-list"},
+        ):
+            with self.subTest(envelope=envelope), self.assertRaises(ValueError):
+                assistant_text(envelope)
 
     def test_parse_protocol_response_accepts_text_parts_and_json_fence(self):
         content = provider_harness.parse_protocol_response(

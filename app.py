@@ -532,6 +532,9 @@ def create_app(test_config=None):
                 db().execute("UPDATE memories SET status='revoked' WHERE id=?", (item['id'],))
         db().execute("UPDATE jobs SET status='cancelled',payload='{}',updated_at=? WHERE user_id=? AND source_type=? AND source_id=? AND status IN ('pending','running')",
                      (now(), g.user['id'], source_type, source_id))
+        growth_invalidator = app.extensions.get('future_self_growth_invalidate_source')
+        if growth_invalidator:
+            growth_invalidator(g.user['id'], source_type, source_id)
 
     def run_jobs(limit=20, user_id=None):
         processed = 0
@@ -803,7 +806,8 @@ def create_app(test_config=None):
             profile = profile_for_model()
             stats = get_state()['model'] if g.user['memory_enabled'] else {}
             growth_context = app.extensions.get('future_self_growth_context')
-            stats['growth'] = growth_context(uid) if growth_context else {}
+            growth_generation_context = growth_context(uid) if growth_context else {}
+            stats['growth'] = growth_generation_context
             active = row("SELECT * FROM focus_sessions WHERE user_id=? AND status!='ended'", (uid,))
             task_id = body.get('task_id') or (active['task_id'] if active else None)
             current_task = owned('tasks', task_id) if task_id else row("SELECT * FROM tasks WHERE user_id=? AND status='ready' ORDER BY id DESC LIMIT 1", (uid,))
@@ -829,7 +833,10 @@ def create_app(test_config=None):
             if not current or current['auth_version'] != session.get('auth_version') or not row("SELECT user_id FROM chat_requests WHERE user_id=? AND request_id=? AND status='pending'", (uid, key)):
                 raise ValueError('source deleted')
             g.user = current
-            if current['memory_enabled'] != memory_enabled or current['consent_version'] != consent_version or profile_for_model() != profile or confirmed_memories() != memories:
+            current_growth_context = growth_context(uid) if growth_context else {}
+            if (current['memory_enabled'] != memory_enabled or current['consent_version'] != consent_version
+                    or profile_for_model() != profile or confirmed_memories() != memories
+                    or current_growth_context != growth_generation_context):
                 raise ValueError('context changed during generation')
             metadata = {key: result.get(key) for key in ('intent', 'action_suggestion', 'evidence_ids', 'model')}
             metadata['persona_version'] = profile['version']

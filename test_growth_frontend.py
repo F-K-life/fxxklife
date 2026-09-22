@@ -49,6 +49,7 @@ class GrowthFrontendTests(unittest.TestCase):
         self.assertIn("/api/growth-evidence", script)
         self.assertLess(script.index("changeSession('finish'"), script.index("/api/growth-evidence"))
         self.assertIn("growth-evidence-draft", script)
+        self.assertIn("flushGrowthEvidence", script)
 
     def test_profile_contains_growth_map_statuses_and_source_links(self):
         html = self.client.get("/profile").get_data(as_text=True)
@@ -56,6 +57,14 @@ class GrowthFrontendTests(unittest.TestCase):
         script = Path("static/js/profile.js").read_text()
         for marker in ("待验证", "练习中", "已有证据", "/echoes?event=", "/focus?task="):
             self.assertIn(marker, script)
+
+    def test_weekly_review_exposes_editable_next_week_confirmation(self):
+        html = self.client.get("/echoes").get_data(as_text=True)
+        for marker in ("weekly-review", "next-week-form", "next-week-hypothesis", "next-week-action-title", "confirm-next-week"):
+            self.assertIn(marker, html)
+        script = Path("static/js/echoes.js").read_text()
+        self.assertIn("next_week_proposal", script)
+        self.assertIn("/api/weekly-experiments/0", script)
 
 
 if __name__ == "__main__":

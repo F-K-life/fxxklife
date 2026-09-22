@@ -101,6 +101,12 @@ class ProviderDiagnosticsTests(unittest.TestCase):
         self.assertIn("category=response_validation", "\n".join(logs.output))
         self.assertNotIn("reply_text", result["reply_text"])
 
+    def test_null_provider_message_uses_safe_local_fallback(self):
+        envelope = {"choices": [{"finish_reason": "stop", "message": None}]}
+        with self._configured_provider(), patch("modeling.urllib.request.urlopen", return_value=self._Response(envelope)):
+            result = modeling.chat_reply("你好", {"tone": "清晰"}, [], [], {"feedback": []})
+        self.assertEqual(result["model"]["mode"], "local")
+
     def test_chat_reply_keeps_plain_text_from_compatible_provider(self):
         envelope = {
             "choices": [{"message": {"content": "这是模型生成的一句话。"}}]

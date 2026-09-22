@@ -69,6 +69,8 @@ def assistant_json(envelope):
     """Return the first assistant JSON object across common compatible shapes."""
     try:
         message = envelope["choices"][0]["message"]
+        if not isinstance(message, dict):
+            raise ValueError("assistant message was not an object")
         content = message.get("content")
         text = _content_text(content)
         if not text:
@@ -82,6 +84,8 @@ def assistant_text(envelope):
     """Return visible assistant text from common compatible response shapes."""
     try:
         message = envelope["choices"][0]["message"]
+        if not isinstance(message, dict):
+            raise ValueError("assistant message was not an object")
         text = _content_text(message.get("content"))
         if not text:
             text = _content_text(message.get("reasoning_content"))
