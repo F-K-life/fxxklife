@@ -2,9 +2,33 @@ import unittest
 
 import provider_harness
 import provider_tls
+from provider_response import assistant_finish_reason, looks_structured
 
 
 class ProviderHarnessTests(unittest.TestCase):
+    def test_structured_markers_are_detected(self):
+        for value in (
+            '{"reply_text":',
+            '[{"reply_text":',
+            '```json\n{"reply_text":',
+            'reply_text: 你好',
+        ):
+            with self.subTest(value=value):
+                self.assertTrue(looks_structured(value))
+        self.assertFalse(looks_structured('先停一下，我们把第一步缩小。'))
+
+    def test_finish_reason_is_normalized(self):
+        self.assertEqual(
+            assistant_finish_reason(
+                {"choices": [{"finish_reason": "length", "message": {"content": "x"}}]}
+            ),
+            "length",
+        )
+        self.assertEqual(
+            assistant_finish_reason({"choices": [{"message": {"content": "x"}}]}),
+            "unknown",
+        )
+
     def test_provider_tls_context_contains_trusted_roots(self):
         context = provider_tls.secure_context()
         self.assertGreater(len(context.get_ca_certs()), 0)
