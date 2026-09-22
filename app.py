@@ -675,6 +675,7 @@ def create_app(test_config=None):
         messages = [message_data(message, feedback_rows) for message in messages]
         model = modeling.build_model(profile_for_model(), confirmed_memories(), sessions, bool(g.user['memory_enabled']))
         model['pending_count'] = row("SELECT COUNT(*) AS n FROM memories WHERE user_id=? AND status='candidate'", (uid,))['n']
+        growth_snapshot = app.extensions.get('future_self_growth_snapshot')
         return dict(user=user_public(g.user), profile=profile, model_profile=profile_for_model(), answers=answers,
             tasks=rows('SELECT * FROM tasks WHERE user_id=? ORDER BY id DESC LIMIT 500', (uid,)), sessions=sessions,
             active_session=next((item for item in sessions if item['status'] != 'ended'), None),
@@ -684,6 +685,7 @@ def create_app(test_config=None):
             milestones=rows('SELECT * FROM milestones WHERE user_id=? ORDER BY date,id', (uid,)),
             jobs=rows('SELECT id,kind,source_type,source_id,status,attempts,last_error,created_at,updated_at FROM jobs WHERE user_id=? ORDER BY id DESC LIMIT 40', (uid,)),
             model=model,
+            growth=growth_snapshot(uid) if growth_snapshot else {'active_experiment': None, 'capabilities': [], 'active_week': None, 'recent_evidence': []},
             server_time=time.time())
 
     @app.get('/api/state')
@@ -1228,7 +1230,8 @@ def create_app(test_config=None):
     def export_account():
         uid = g.user['id']
         exported = {'exported_at': now(), 'user': user_public(g.user), 'profile': get_profile()}
-        for table in ('messages', 'tasks', 'focus_sessions', 'events', 'letters', 'memories', 'milestones'):
+        for table in ('messages', 'tasks', 'focus_sessions', 'events', 'letters', 'memories', 'milestones',
+                      'growth_experiments', 'capabilities', 'weekly_experiments', 'growth_evidence'):
             exported[table] = rows(f'SELECT * FROM {table} WHERE user_id=? ORDER BY id', (uid,))
         exported['focus_intervals'] = rows('SELECT i.* FROM focus_intervals i JOIN focus_sessions s ON s.id=i.session_id WHERE s.user_id=? ORDER BY i.id', (uid,))
         response = jsonify(exported)
@@ -1248,6 +1251,11 @@ def create_app(test_config=None):
                          'get_profile': get_profile, 'model_profile': profile_for_model,
                          'invalidate_source': invalidate_source, 'now': now, 'queue_job': queue_job,
                          'confirmed_memories': confirmed_memories})
+    from growth import register_growth
+    register_growth(app, {'db': db, 'row': row, 'rows': rows, 'owned': owned, 'require_auth': require_auth,
+                          'data': data, 'text': text, 'number': number, 'boolean': boolean,
+                          'nullable_owner': nullable_owner, 'get_profile': get_profile,
+                          'model_profile': profile_for_model, 'now': now})
     if not app.config.get('TESTING'):
         def worker():
             while True:
