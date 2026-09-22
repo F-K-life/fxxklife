@@ -27,6 +27,11 @@ class GrowthFrontendTests(unittest.TestCase):
         self.assertIn('aria-label="关闭成长主题创建向导"', html)
         self.assertIn('type="submit"', html)
 
+    def test_mobile_chat_keeps_growth_creation_entry_outside_hidden_aside(self):
+        html = self.client.get("/chat").get_data(as_text=True)
+        self.assertIn('id="open-growth-create-mobile"', html)
+        self.assertLess(html.index('id="open-growth-create-mobile"'), html.index('<aside class="connect-aside"'))
+
     def test_chat_script_calls_confirmed_growth_endpoints_and_escapes_text(self):
         script = Path("static/js/chat.js").read_text()
         for marker in ("/api/growth-experiments", "/capability-draft", "/capabilities/confirm",

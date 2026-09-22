@@ -5,6 +5,17 @@
 > 仓库：F-K-life/fxxklife  
 > 适用对象：产品负责人、设计师、接手开发者、黑客松演示者与部署维护者。
 
+## 12 周成长实验交接
+
+- 每位用户最多一个 `active` 成长主题；其他主题保持 `draft` 或 `paused`。
+- 沟通页的四步向导依次确认未来身份、12 周成果、能力地图、本周假设/行动。草稿端点不写入权威状态。
+- 能力状态为 `unverified`（待验证）、`practicing`（练习中）、`evidenced`（已有证据）。只有 `active` 且 `confirmed_by_user=1` 的证据能支持 `evidenced`。
+- 沉浸 `finish` 先独立提交，然后才调用 `/api/growth-evidence`。证据失败会保留 `growth-evidence-draft`并提供重试，不撤销计时/event。
+- 周回顾保存 `experiment_id` 和 `week_number`，引用事件/证据 ID；下一周只是 `stats.next_week_proposal`，不自动新建周记录。
+- API：`POST /api/growth-experiments`、`POST .../capability-draft`、`POST .../capabilities/confirm`、`POST .../weekly-draft`、`PATCH /api/weekly-experiments/<id>`、`POST/PATCH /api/growth-evidence`。确认类请求需要 `request_id` 和当前 `version`。
+- 迁移只增加表和可空关联列，旧用户没有成长实验时仍可沟通、沉浸、回响和编辑画像。升级前备份 `instance/future_self.db`；如需数据级回滚，恢复该备份，不要仅回滚源码。
+- AI 提议不会在未经用户确认时变成任务、能力结论或成长证据。
+
 ## 1. 接手先读：产品是什么、现在到哪里
 
 **一句话定位：** 一个由用户亲自定义、可以持续纠正的“未来理想自我”，通过对话帮助用户自主选择小行动，再用真实行动记录形成回响与理解。

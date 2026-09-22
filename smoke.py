@@ -192,7 +192,46 @@ if __name__ == '__main__':
         assert api('/api/drafts/chat-draft', {'value': '冲突草稿', 'base_version': 0}, 'PUT', 409)['conflict']['value'] == '第一份草稿'
         api('/api/drafts/letter-draft', {'value': '旧版本', 'base_version': 1}, 'PUT', 409)
         api('/api/feedback', {'event_id': event['id'], 'helpful': True, 'autonomy': 'understood'})
-        assert api('/api/reviews/weekly', {})['review']['body']
+
+        growth = api('/api/growth-experiments', {
+            'title': '成为能交付的 AI 产品经理', 'future_identity': '能把真实问题变成可验证产品的人',
+            'desired_outcome': '完成一个可供真实用户试用的作品'})['experiment']
+        capability_draft = api(f"/api/growth-experiments/{growth['id']}/capability-draft", {})['capabilities'][:3]
+        confirmed = api(f"/api/growth-experiments/{growth['id']}/capabilities/confirm", {
+            'version': growth['version'], 'request_id': 'smoke-growth-capabilities', 'capabilities': capability_draft})
+        growth, capabilities = confirmed['experiment'], confirmed['capabilities']
+        weekly_draft = api(f"/api/growth-experiments/{growth['id']}/weekly-draft", {})
+        week_body = {'experiment_id': growth['id'], 'experiment_version': growth['version'], 'week_number': 1,
+                     'capability_id': capabilities[0]['id'], 'hypothesis': weekly_draft['hypothesis'],
+                     'success_signal': weekly_draft['success_signal'], 'confirm_action': True,
+                     'request_id': 'smoke-growth-week', 'action': weekly_draft['action']}
+        week = api('/api/weekly-experiments/0', week_body, 'PATCH')
+        assert api('/api/weekly-experiments/0', week_body, 'PATCH')['task']['id'] == week['task']['id']
+        growth_base = time.time() - 30
+        growth_session = api('/api/focus/start', {'task_id': week['task']['id'], 'request_id': 'growth-focus-start',
+                                                   'offline': True, 'occurred_at': growth_base})['session']
+        growth_endpoint = f"/api/focus/{growth_session['id']}"
+        api(growth_endpoint, {'action': 'end', 'request_id': 'growth-focus-end', 'offline': True,
+                              'occurred_at': growth_base + 20})
+        growth_finish = api(growth_endpoint, {'action': 'finish', 'request_id': 'growth-focus-finish', 'offline': True,
+                                               'occurred_at': growth_base + 21, 'result': 'completed',
+                                               'reflection': '缩小范围后更容易启动'})
+        evidence_body = {'experiment_id': growth['id'], 'capability_id': capabilities[0]['id'],
+                         'weekly_experiment_id': week['weekly_experiment']['id'], 'task_id': week['task']['id'],
+                         'session_id': growth_session['id'], 'event_id': growth_finish['event']['id'], 'kind': 'reflection',
+                         'content': '我完成了一次真实验证并记录了调整。', 'source_label': '第一周真实练习',
+                         'confirmed_by_user': True, 'request_id': 'smoke-growth-evidence'}
+        evidence = api('/api/growth-evidence', evidence_body)['evidence']
+        assert api('/api/growth-evidence', evidence_body)['evidence']['id'] == evidence['id']
+        growth_state = state()['growth']
+        assert growth_state['capabilities'][0]['status'] == 'evidenced'
+        assert growth_state['recent_evidence'][0]['id'] == evidence['id']
+        week_count = sql('SELECT COUNT(*) FROM weekly_experiments WHERE experiment_id=?', (growth['id'],))[0][0]
+        review = api('/api/reviews/weekly', {})['review']
+        assert review['body'] and review['experiment_id'] == growth['id'] and review['week_number'] == 1
+        assert review['stats']['next_week_proposal'] and sql('SELECT COUNT(*) FROM weekly_experiments WHERE experiment_id=?', (growth['id'],))[0][0] == week_count
+        assert sql('SELECT COUNT(*) FROM tasks WHERE experiment_id=?', (growth['id'],))[0][0] == 1
+        assert sql('SELECT COUNT(*) FROM growth_evidence WHERE experiment_id=?', (growth['id'],))[0][0] == 1
         assert api('/api/analytics', method='GET')['feedback']
         assert client.get('/api/export').headers['Content-Disposition'].startswith('attachment')
 
@@ -205,7 +244,8 @@ if __name__ == '__main__':
             other_csrf = saved['csrf_token']
         assert stranger.post(endpoint, json={'action': 'finish'}, headers={'X-CSRF-Token': other_csrf}).status_code == 404
         assert stranger.get('/api/events/' + str(event['id'])).status_code == 404
+        assert stranger.patch('/api/growth-experiments/' + str(growth['id']), json={'title': '越权', 'version': growth['version']}, headers={'X-CSRF-Token': other_csrf}).status_code == 404
         assert stranger.get('/api/state').get_json()['events'] == []
         assert stranger.get('/api/state').get_json()['user']['id'] != uid
-    print('PASS: V2 auth, consent, memory, durable jobs, offline focus, rewrite, goals, timed letters, import, history, drafts, weekly review, isolation; 1 flow')
+    print('PASS: V2 auth, consent, memory, durable jobs, offline focus, rewrite, goals, growth experiment, evidence map, weekly review, isolation; 1 flow')
     print('SMOKE OK')

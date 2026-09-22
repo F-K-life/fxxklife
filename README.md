@@ -48,6 +48,16 @@ python app.py
 - **画像**：理想与当下分开保存；记忆候选确认、拒绝、修正和删除；查看来源、授权开关、版本及算法依据。
 - **账号管理**：修改称呼 / 密码、退出、数据导出、删除当前账号及关联数据。
 
+### 12 周成长实验
+
+每个账号同时最多一个进行中主题。创建向导依次确认：未来身份、12 周成果、3–7 项能力地图、第一周假设与行动。AI 只返回可编辑草案；用户确认前，不会创建能力、任务或证据。
+
+能力状态只有“待验证 / 练习中 / 已有证据”，不是分数。沉浸结束时先保存计时、结果和反思，再单独保存用户确认的作品、链接或反思证据。证据写入失败时保留本机草稿可重试，不回滚已发生的沉浸事实。来源被删除或校正后，相关证据不再支持 AI 结论。
+
+主要 API：`/api/growth-experiments`、`/api/growth-experiments/<id>/capability-draft`、`/capabilities/confirm`、`/weekly-draft`、`/api/weekly-experiments/<id>` 和 `/api/growth-evidence`。多记录确认使用请求 ID、版本号与事务，重放不会产生重复任务或证据。
+
+数据库在启动时增量新建成长表及任务/周报关联列，不删除旧记录。升级前应备份 `instance/future_self.db`；源码回滚不会自动删除新表，数据回滚应使用升级前备份。
+
 每个页面独立样式：`login.css`、`register.css`、`onboarding.css`、`chat.css`、`focus.css`、`echoes.css`、`profile.css`。`base.css` 仅承载设计令牌、导航和共用控件。桌面侧栏、手机底部导航，支持键盘与减少动效。
 
 ## AI 与可解释建模

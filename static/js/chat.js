@@ -31,7 +31,7 @@
     draftNotice();const source=sourceTarget?Array.from(messages.querySelectorAll('[data-message-id]')).find(el=>el.classList.contains('message')&&el.dataset.messageId===sourceTarget):null;if(source){source.classList.add('is-source-message');if(!sourceLocated){area.scrollTop+=source.getBoundingClientRect().top-area.getBoundingClientRect().top-16;sourceLocated=true;}else area.scrollTop=position;}else if(sourceTarget){area.scrollTop=position;if(!sourceLocated){sourceLocated=true;FS.toast('原消息不在当前载入的记录中。');}}else if(state.messages.length&&nearBottom)scroll();else area.scrollTop=position;
   }
   function renderGrowthSummary(){
-    const target=$('#growth-summary-content'),growth=state?.growth||{},experiment=growth.active_experiment;
+    const target=$('#growth-summary-content'),growth=state?.growth||{},experiment=growth.active_experiment;$('#open-growth-create-mobile').hidden=!!experiment;
     if(!experiment){target.innerHTML='<button type="button" class="button button-secondary" id="open-growth-create">建立 12 周成长主题</button>';target.querySelector('button').onclick=openGrowthWizard;return;}
     const week=growth.active_week,task=state.tasks.find(item=>item.weekly_experiment_id===week?.id),evidence=growth.recent_evidence?.[0];
     target.innerHTML=`<h3>${FS.escape(experiment.title)}</h3><p>第 ${FS.escape(week?.week_number||experiment.current_week||1)} 周 · ${FS.escape(week?.hypothesis||'等待确认本周实验')}</p>${task?`<a href="/focus?task=${task.id}">${FS.escape(task.title)}</a>`:''}${evidence?`<small>最近证据：${FS.escape(evidence.source_label)}</small>`:''}`;
@@ -115,5 +115,5 @@
   window.addEventListener('fs:sync',syncView);
   input.addEventListener('blur',()=>{if(reloadPending)syncView();});
   dialog.addEventListener('close',()=>{if(reloadPending)syncView();});
-  $('#open-growth-create').onclick=openGrowthWizard;resize();draftNotice();load();
+  $('#open-growth-create').onclick=openGrowthWizard;$('#open-growth-create-mobile').onclick=openGrowthWizard;resize();draftNotice();load();
 })();
