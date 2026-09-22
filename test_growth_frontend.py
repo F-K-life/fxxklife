@@ -34,6 +34,24 @@ class GrowthFrontendTests(unittest.TestCase):
             self.assertIn(marker, script)
         self.assertTrue("textContent" in script or "FS.escape" in script)
 
+    def test_focus_exposes_growth_context_progressive_help_and_evidence_fields(self):
+        html = self.client.get("/focus").get_data(as_text=True)
+        for marker in ("focus-capability", "focus-hypothesis", "focus-expected-evidence", "focus-help",
+                       "我卡住了", "evidence-content", "evidence-link", "reflection-difficulty",
+                       "reflection-method", "reflection-capability", "reflection-adjustment", "retry-evidence"):
+            self.assertIn(marker, html)
+        script = Path("static/js/focus.js").read_text()
+        self.assertIn("/api/growth-evidence", script)
+        self.assertLess(script.index("changeSession('finish'"), script.index("/api/growth-evidence"))
+        self.assertIn("growth-evidence-draft", script)
+
+    def test_profile_contains_growth_map_statuses_and_source_links(self):
+        html = self.client.get("/profile").get_data(as_text=True)
+        self.assertIn("growth-map", html)
+        script = Path("static/js/profile.js").read_text()
+        for marker in ("待验证", "练习中", "已有证据", "/echoes?event=", "/focus?task="):
+            self.assertIn(marker, script)
+
 
 if __name__ == "__main__":
     unittest.main()

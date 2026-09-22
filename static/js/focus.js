@@ -56,6 +56,9 @@
     $('task-first-step').textContent = task?.first_step || '把大的愿望，拆成能开始的小事。';
     $('task-done').textContent = task?.done_criteria || '由你定义，怎样才算完成。';
     $('task-duration').textContent = `${task?.planned_minutes || 25} 分钟`;
+    const growth=state.growth||{},week=growth.active_week,capabilities=growth.capabilities||[],capability=capabilities.find(item=>item.id===task?.capability_id);
+    $('growth-focus-context').hidden=!task?.experiment_id;$('focus-capability').textContent=capability?.name||'待确认';$('focus-hypothesis').textContent=week?.hypothesis||'待确认本周假设';
+    $('reflection-capability').innerHTML=capabilities.map(item=>`<option value="${FS.escape(item.id)}">${FS.escape(item.name)}</option>`).join('');if(task?.capability_id)$('reflection-capability').value=task.capability_id;
     $('start-focus').hidden = !!session;
     $('pause-focus').hidden = !['running','paused'].includes(session?.status); $('end-focus').hidden = $('pause-focus').hidden;
     $('continue-finish').hidden = session?.status !== 'ending';
@@ -130,8 +133,16 @@
   $('end-focus').onclick = () => $('end-dialog').showModal();
   $('confirm-end').onclick = () => operation(async () => { $('end-dialog').close(); await changeSession('end'); });
   $('continue-finish').onclick = showFinish;
+  let helpLevel=0;$('focus-help').onclick=()=>{helpLevel=Math.min(3,helpLevel+1);const help=[`先问自己：现在最小的不确定是什么？`,task?.first_step||'只做一个两分钟能开始的动作。',`例如：${task?.first_step||'打开空白页，写下第一句。'}`][helpLevel-1];$('focus-help-content').hidden=false;$('focus-help-content').textContent=help;if(helpLevel===3)$('focus-help').disabled=true;};
   $('finish-form').oninput = () => { if (session) FS.store(`focus-result-${session.id}`,Object.fromEntries(new FormData($('finish-form')))); };
-  $('finish-form').onsubmit = e => { e.preventDefault(); operation(async () => { const id = session.id, body = Object.fromEntries(new FormData($('finish-form'))); FS.store(`focus-result-${id}`,body); $('finish-dialog').close(); await changeSession('finish',body); if (!queue.length) { FS.store(`focus-result-${id}`,{}); location.href = `/echoes?session=${id}`; } else FS.toast('结果与反思已保存到此设备，连接恢复后自动同步。'); }); };
+  $('finish-form').onsubmit = e => { e.preventDefault(); operation(async () => { const id = session.id, body = Object.fromEntries(new FormData($('finish-form'))); FS.store(`focus-result-${id}`,body); $('finish-dialog').close(); await changeSession('finish',body); if (!queue.length) { FS.store(`focus-result-${id}`,{});const saved=await submitGrowthEvidence(id,body);if(saved)location.href = `/echoes?session=${id}`; } else FS.toast('结果与反思已保存到此设备，连接恢复后自动同步。'); }); };
+  async function submitGrowthEvidence(sessionId,body){
+    if(!task?.experiment_id||(!body.evidence_content?.trim()&&!body.evidence_link?.trim()))return true;
+    const event=state.events?.find(item=>String(item.session_id)===String(sessionId)),content=(body.evidence_link||body.evidence_content).trim();
+    const draft={experiment_id:task.experiment_id,capability_id:Number(body.capability_id||task.capability_id),weekly_experiment_id:task.weekly_experiment_id,task_id:task.id,session_id:sessionId,event_id:event?.id,kind:body.evidence_link?'link':'reflection',content,source_label:task.title,confirmed_by_user:true,request_id:crypto.randomUUID()};FS.store('growth-evidence-draft',draft);
+    try{await FS.api('/api/growth-evidence',{method:'POST',body:draft});FS.store('growth-evidence-draft',null);$('retry-evidence').hidden=true;return true;}catch(error){$('retry-evidence').hidden=false;$('finish-dialog').showModal();FS.toast(`沉浸结果已保存；成长证据待重试：${error.message}`,'error');return false;}
+  }
+  $('retry-evidence').onclick=()=>operation(async()=>{const draft=FS.load('growth-evidence-draft',null);if(!draft)return;await FS.api('/api/growth-evidence',{method:'POST',body:draft});FS.store('growth-evidence-draft',null);$('retry-evidence').hidden=true;location.href=`/echoes?session=${draft.session_id}`;});
   $('retry-focus-sync').onclick = () => operation(() => queue.length ? synchronize() : refresh());
   $('sound-volume').value = FS.load('focus-volume',0.25);
   document.querySelectorAll('[data-sound]').forEach(button => button.onclick = async () => { try { await FS.audio.set(button.dataset.sound,Number($('sound-volume').value)); sound = button.dataset.sound; document.querySelectorAll('[data-sound]').forEach(b => { b.classList.toggle('active',b === button); b.setAttribute('aria-pressed',String(b === button)); }); } catch (err) { FS.toast(err.message,'error'); } });
