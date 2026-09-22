@@ -62,6 +62,27 @@ class GrowthExperimentTests(unittest.TestCase):
         body.update(changes)
         return self.api("/api/growth-experiments", body)
 
+    def confirmed_experiment(self, title="成长主题"):
+        experiment = self.create_experiment(title=title).get_json()["experiment"]
+        capabilities = [
+            {"name": f"能力{i}", "description": f"说明{i}", "target_state": f"目标{i}"}
+            for i in range(1, 4)
+        ]
+        result = self.api(
+            f"/api/growth-experiments/{experiment['id']}/capabilities/confirm",
+            {"version": experiment["version"], "request_id": f"caps-{experiment['id']}", "capabilities": capabilities},
+        ).get_json()
+        return result["experiment"], result["capabilities"]
+
+    def activate_week(self, experiment, capability, request_id="week-1"):
+        return self.api("/api/weekly-experiments/0", {
+            "experiment_id": experiment["id"], "experiment_version": experiment["version"],
+            "week_number": 1, "capability_id": capability["id"], "hypothesis": "一次真实练习能暴露关键差距",
+            "success_signal": "留下结果并写出下一次调整", "confirm_action": True, "request_id": request_id,
+            "action": {"title": "完成一次真实练习", "first_step": "写下要验证的问题", "done_criteria": "留下结果和调整",
+                       "planned_minutes": 20, "expected_evidence_kind": "reflection"}
+        }, method="PATCH")
+
     def test_empty_growth_state_is_backward_compatible(self):
         state = self.client.get("/api/state").get_json()
         self.assertEqual(
@@ -200,6 +221,43 @@ class GrowthExperimentTests(unittest.TestCase):
             counts_after_confirm["tasks"],
         )
         self.assertEqual(confirmed["experiment"]["status"], "draft")
+
+    def test_only_one_active_experiment_per_user(self):
+        first, first_caps = self.confirmed_experiment("主题一")
+        second, second_caps = self.confirmed_experiment("主题二")
+        activated = self.activate_week(first, first_caps[0], "activate-first")
+        self.assertEqual(activated.status_code, 200)
+        blocked = self.activate_week(second, second_caps[0], "activate-second")
+        self.assertEqual(blocked.status_code, 409)
+        self.assertEqual(self.sql("SELECT COUNT(*) AS n FROM growth_experiments WHERE status='active'")[0]["n"], 1)
+
+    def test_stale_version_returns_409_without_partial_writes(self):
+        experiment, capabilities = self.confirmed_experiment()
+        before = self.sql("SELECT COUNT(*) AS n FROM tasks")[0]["n"]
+        stale = dict(experiment, version=experiment["version"] - 1)
+        response = self.activate_week(stale, capabilities[0], "stale-week")
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.sql("SELECT COUNT(*) AS n FROM weekly_experiments")[0]["n"], 0)
+        self.assertEqual(self.sql("SELECT COUNT(*) AS n FROM tasks")[0]["n"], before)
+
+    def test_week_confirmation_is_idempotent_and_links_task(self):
+        experiment, capabilities = self.confirmed_experiment()
+        first = self.activate_week(experiment, capabilities[0], "linked-week")
+        self.assertEqual(first.status_code, 200)
+        payload = first.get_json()
+        replay = self.activate_week(experiment, capabilities[0], "linked-week")
+        self.assertEqual(replay.get_json(), payload)
+        task = payload["task"]
+        self.assertEqual(task["experiment_id"], experiment["id"])
+        self.assertEqual(task["weekly_experiment_id"], payload["weekly_experiment"]["id"])
+        self.assertEqual(task["capability_id"], capabilities[0]["id"])
+        manual = self.api("/api/tasks", {
+            "title": "手动关联行动", "first_step": "开始", "done_criteria": "留下结果", "planned_minutes": 10,
+            "experiment_id": experiment["id"], "weekly_experiment_id": payload["weekly_experiment"]["id"],
+            "capability_id": capabilities[0]["id"]
+        })
+        self.assertEqual(manual.status_code, 201)
+        self.assertEqual(manual.get_json()["task"]["experiment_id"], experiment["id"])
 
 
 if __name__ == "__main__":

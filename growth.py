@@ -90,7 +90,7 @@ CREATE INDEX IF NOT EXISTS growth_evidence_owner ON growth_evidence(user_id, exp
 def register_growth(app, services):
     db, row, rows = (services[key] for key in ("db", "row", "rows"))
     owned, auth, data = (services[key] for key in ("owned", "require_auth", "data"))
-    text, number, now = (services[key] for key in ("text", "number", "now"))
+    text, number, boolean, now = (services[key] for key in ("text", "number", "boolean", "now"))
     get_profile, model_profile = (services[key] for key in ("get_profile", "model_profile"))
 
     with app.app_context():
@@ -318,4 +318,79 @@ def register_growth(app, services):
         )
         result = modeling.growth_weekly_draft(model_profile(), experiment, capabilities, evidence)
         verify_context(experiment, profile_version, consent_version)
+        return jsonify(result)
+
+    @app.patch("/api/weekly-experiments/<int:weekly_id>")
+    @auth
+    def confirm_weekly_experiment(weekly_id):
+        body = data()
+        request_id = text(body, "request_id", 100, True)
+        connection = db()
+        connection.execute("BEGIN IMMEDIATE")
+        repeated = row("SELECT result FROM growth_actions WHERE user_id=? AND request_id=?",
+                       (g.user["id"], request_id))
+        if repeated:
+            connection.commit()
+            return jsonify(json.loads(repeated["result"]))
+        experiment = owned("growth_experiments", number(body, "experiment_id"))
+        if number(body, "experiment_version") != experiment["version"]:
+            connection.rollback()
+            abort(409, description="成长主题刚有更新，请刷新后确认。")
+        if experiment["status"] not in ("draft", "active"):
+            connection.rollback()
+            abort(409, description="当前成长主题不能开始新一周。")
+        other = row("SELECT id FROM growth_experiments WHERE user_id=? AND status='active' AND id!=?",
+                    (g.user["id"], experiment["id"]))
+        if other:
+            connection.rollback()
+            abort(409, description="请先暂停当前进行中的成长主题。")
+        capability = owned("capabilities", number(body, "capability_id"))
+        if capability["experiment_id"] != experiment["id"]:
+            connection.rollback()
+            abort(400, description="能力与成长主题不匹配。")
+        week_number = number(body, "week_number", 1, 12)
+        stamp = now()
+        connection.execute("UPDATE weekly_experiments SET status='ready_for_review',version=version+1,updated_at=? WHERE user_id=? AND experiment_id=? AND status='active'",
+                           (stamp, g.user["id"], experiment["id"]))
+        if weekly_id:
+            weekly = owned("weekly_experiments", weekly_id)
+            if weekly["experiment_id"] != experiment["id"]:
+                connection.rollback()
+                abort(400, description="周实验与成长主题不匹配。")
+            connection.execute("UPDATE weekly_experiments SET hypothesis=?,success_signal=?,status='active',version=version+1,updated_at=? WHERE id=?",
+                               (text(body, "hypothesis", 700, True), text(body, "success_signal", 700, True), stamp, weekly_id))
+        else:
+            weekly_id = connection.execute(
+                """INSERT INTO weekly_experiments(user_id,experiment_id,week_number,hypothesis,success_signal,status,created_at,updated_at)
+                   VALUES(?,?,?,?,?,'active',?,?)""",
+                (g.user["id"], experiment["id"], week_number, text(body, "hypothesis", 700, True),
+                 text(body, "success_signal", 700, True), stamp, stamp),
+            ).lastrowid
+        task = None
+        if boolean(body, "confirm_action"):
+            action = body.get("action")
+            if not isinstance(action, dict):
+                connection.rollback()
+                abort(400, description="请确认本周行动。")
+            minutes = action.get("planned_minutes")
+            if isinstance(minutes, bool) or not isinstance(minutes, int) or not 1 <= minutes <= 180:
+                connection.rollback()
+                abort(400, description="行动时长需为 1 至 180 分钟。")
+            task_id = connection.execute(
+                """INSERT INTO tasks(user_id,title,first_step,done_criteria,planned_minutes,status,created_at,
+                   experiment_id,weekly_experiment_id,capability_id) VALUES(?,?,?,?,?,'ready',?,?,?,?)""",
+                (g.user["id"], bounded(action.get("title"), "行动标题", 200),
+                 bounded(action.get("first_step"), "第一步", 300), bounded(action.get("done_criteria"), "完成标准", 300),
+                 minutes, stamp, experiment["id"], weekly_id, capability["id"]),
+            ).lastrowid
+            task = row("SELECT * FROM tasks WHERE id=?", (task_id,))
+        connection.execute("UPDATE growth_experiments SET status='active',current_week=?,version=version+1,updated_at=? WHERE id=?",
+                           (week_number, stamp, experiment["id"]))
+        connection.execute("UPDATE capabilities SET status='practicing',version=version+1,updated_at=? WHERE id=? AND status='unverified'",
+                           (stamp, capability["id"]))
+        result = {"experiment": row("SELECT * FROM growth_experiments WHERE id=?", (experiment["id"],)),
+                  "weekly_experiment": row("SELECT * FROM weekly_experiments WHERE id=?", (weekly_id,)), "task": task}
+        connection.execute("INSERT INTO growth_actions VALUES(?,?,?,?,?)",
+                           (g.user["id"], request_id, "confirm_week", weekly_id, json.dumps(result, ensure_ascii=False)))
+        connection.commit()
         return jsonify(result)

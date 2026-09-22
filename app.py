@@ -875,10 +875,18 @@ def create_app(test_config=None):
             owned('messages', number(body, 'source_message_id'))
         goal_id = nullable_owner(body, 'goal_id', 'goals')
         milestone_id = nullable_owner(body, 'milestone_id', 'milestones')
+        experiment_id = nullable_owner(body, 'experiment_id', 'growth_experiments')
+        weekly_experiment_id = nullable_owner(body, 'weekly_experiment_id', 'weekly_experiments')
+        capability_id = nullable_owner(body, 'capability_id', 'capabilities')
         if milestone_id and goal_id and owned('milestones', milestone_id).get('goal_id') not in (None, goal_id):
             abort(400, description='里程碑与目标不匹配。')
-        tid = db().execute('INSERT INTO tasks(user_id,title,first_step,done_criteria,planned_minutes,source_message_id,created_at,goal_id,milestone_id) VALUES(?,?,?,?,?,?,?,?,?)',
-                           (g.user['id'], *values, minutes, source_id, now(), goal_id, milestone_id)).lastrowid
+        for linked_id, table in ((weekly_experiment_id, 'weekly_experiments'), (capability_id, 'capabilities')):
+            if linked_id and owned(table, linked_id)['experiment_id'] != experiment_id:
+                abort(400, description='成长行动关联不一致。')
+        tid = db().execute('''INSERT INTO tasks(user_id,title,first_step,done_criteria,planned_minutes,source_message_id,created_at,
+                           goal_id,milestone_id,experiment_id,weekly_experiment_id,capability_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''',
+                           (g.user['id'], *values, minutes, source_id, now(), goal_id, milestone_id,
+                            experiment_id, weekly_experiment_id, capability_id)).lastrowid
         db().commit()
         return jsonify(task=owned('tasks', tid)), 201
 
