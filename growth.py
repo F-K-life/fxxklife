@@ -1,5 +1,10 @@
 """Owner-scoped 12-week growth experiment domain and APIs."""
 
+import json
+from datetime import date, timedelta
+
+from flask import abort, g, jsonify, request
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS growth_experiments (
@@ -82,6 +87,8 @@ CREATE INDEX IF NOT EXISTS growth_evidence_owner ON growth_evidence(user_id, exp
 
 def register_growth(app, services):
     db, row, rows = (services[key] for key in ("db", "row", "rows"))
+    owned, auth, data = (services[key] for key in ("owned", "require_auth", "data"))
+    text, number, now = (services[key] for key in ("text", "number", "now"))
 
     with app.app_context():
         db().executescript(SCHEMA)
@@ -131,3 +138,144 @@ def register_growth(app, services):
 
     app.extensions["future_self_growth_snapshot"] = growth_snapshot
 
+    def bounded(value, label, limit, required=True):
+        if not isinstance(value, str) or len(value) > limit:
+            abort(400, description=f"{label} 需要不超过 {limit} 字的文本。")
+        value = value.strip()
+        if required and not value:
+            abort(400, description=f"请填写{label}。")
+        return value
+
+    @app.route("/api/growth-experiments", methods=["GET", "POST"])
+    @auth
+    def growth_experiments():
+        if request.method == "GET":
+            return jsonify(
+                experiments=rows(
+                    "SELECT * FROM growth_experiments WHERE user_id=? ORDER BY id DESC",
+                    (g.user["id"],),
+                )
+            )
+        body = data()
+        start = date.today()
+        stamp = now()
+        experiment_id = db().execute(
+            """INSERT INTO growth_experiments(
+                 user_id,title,future_identity,desired_outcome,start_date,end_date,created_at,updated_at)
+               VALUES(?,?,?,?,?,?,?,?)""",
+            (
+                g.user["id"],
+                text(body, "title", 160, True),
+                text(body, "future_identity", 1000, True),
+                text(body, "desired_outcome", 1000, True),
+                start.isoformat(),
+                (start + timedelta(weeks=12)).isoformat(),
+                stamp,
+                stamp,
+            ),
+        ).lastrowid
+        db().commit()
+        return jsonify(experiment=owned("growth_experiments", experiment_id)), 201
+
+    @app.patch("/api/growth-experiments/<int:experiment_id>")
+    @auth
+    def update_growth_experiment(experiment_id):
+        experiment = owned("growth_experiments", experiment_id)
+        body = data()
+        if number(body, "version") != experiment["version"]:
+            abort(409, description="成长主题刚有更新，请刷新后重试。")
+        status = body.get("status", experiment["status"])
+        if status not in ("draft", "paused", "completed") and status != experiment["status"]:
+            abort(400, description="请通过确认周实验来激活成长主题。")
+        db().execute(
+            """UPDATE growth_experiments SET title=?,future_identity=?,desired_outcome=?,
+               status=?,version=version+1,updated_at=? WHERE id=? AND user_id=?""",
+            (
+                text(body, "title", 160, True, experiment["title"]),
+                text(body, "future_identity", 1000, True, experiment["future_identity"]),
+                text(body, "desired_outcome", 1000, True, experiment["desired_outcome"]),
+                status,
+                now(),
+                experiment_id,
+                g.user["id"],
+            ),
+        )
+        db().commit()
+        return jsonify(experiment=owned("growth_experiments", experiment_id))
+
+    @app.post("/api/growth-experiments/<int:experiment_id>/capabilities/confirm")
+    @auth
+    def confirm_capabilities(experiment_id):
+        body = data()
+        request_id = text(body, "request_id", 100, True)
+        connection = db()
+        connection.execute("BEGIN IMMEDIATE")
+        repeated = row(
+            "SELECT result FROM growth_actions WHERE user_id=? AND request_id=?",
+            (g.user["id"], request_id),
+        )
+        if repeated:
+            connection.commit()
+            return jsonify(json.loads(repeated["result"]))
+        experiment = owned("growth_experiments", experiment_id)
+        if experiment["status"] != "draft":
+            connection.rollback()
+            abort(409, description="只能调整尚未激活的能力草案。")
+        if number(body, "version") != experiment["version"]:
+            connection.rollback()
+            abort(409, description="成长主题刚有更新，请刷新后重试。")
+        submitted = body.get("capabilities")
+        if not isinstance(submitted, list) or not 3 <= len(submitted) <= 7:
+            connection.rollback()
+            abort(400, description="请确认 3 至 7 项能力。")
+        normalized = []
+        names = set()
+        for position, item in enumerate(submitted, 1):
+            if not isinstance(item, dict):
+                connection.rollback()
+                abort(400, description="能力格式未识别。")
+            name = bounded(item.get("name"), "能力名称", 80)
+            key = name.casefold()
+            if key in names:
+                connection.rollback()
+                abort(400, description="能力名称不能重复。")
+            names.add(key)
+            normalized.append(
+                (
+                    name,
+                    bounded(item.get("description", ""), "能力说明", 500, False),
+                    bounded(item.get("target_state", ""), "目标状态", 500, False),
+                    position,
+                )
+            )
+        stamp = now()
+        connection.execute(
+            "DELETE FROM capabilities WHERE user_id=? AND experiment_id=?",
+            (g.user["id"], experiment_id),
+        )
+        connection.executemany(
+            """INSERT INTO capabilities(
+                 user_id,experiment_id,name,description,target_state,position,created_at,updated_at)
+               VALUES(?,?,?,?,?,?,?,?)""",
+            [
+                (g.user["id"], experiment_id, name, description, target, position, stamp, stamp)
+                for name, description, target, position in normalized
+            ],
+        )
+        connection.execute(
+            "UPDATE growth_experiments SET version=version+1,updated_at=? WHERE id=?",
+            (stamp, experiment_id),
+        )
+        result = {
+            "experiment": row("SELECT * FROM growth_experiments WHERE id=?", (experiment_id,)),
+            "capabilities": rows(
+                "SELECT * FROM capabilities WHERE user_id=? AND experiment_id=? ORDER BY position",
+                (g.user["id"], experiment_id),
+            ),
+        }
+        connection.execute(
+            "INSERT INTO growth_actions VALUES(?,?,?,?,?)",
+            (g.user["id"], request_id, "confirm_capabilities", experiment_id, json.dumps(result, ensure_ascii=False)),
+        )
+        connection.commit()
+        return jsonify(result)
