@@ -9,6 +9,7 @@ if '--expect-unbuilt' in sys.argv:
 
 if __name__ == '__main__':
     import os
+    import json
     import sqlite3
     import tempfile
     import time
@@ -74,6 +75,36 @@ if __name__ == '__main__':
         for page in ('chat', 'focus', 'echoes', 'profile'):
             assert client.get('/' + page).status_code == 200
         assert client.post('/api/tasks', json={}).status_code == 403
+
+        class ProviderResponse:
+            def __init__(self, envelope):
+                self.payload = json.dumps(envelope).encode('utf-8')
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _limit):
+                return self.payload
+
+        broken = {'choices': [{'finish_reason': 'length', 'message': {'content': '{"reply_text":"不应显示"'}}]}
+        repaired = {'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps({
+            'reply_text': '这是修复后的可见回答。', 'intent': 'listen',
+            'action_suggestion': None, 'evidence_ids': []}, ensure_ascii=False)}}]}
+        provider_env = {'AI_BASE_URL': 'https://provider.example/v1', 'AI_MODEL': 'test-model', 'AI_API_KEY': 'test-only-key'}
+        with patch.dict(os.environ, provider_env), patch('modeling.urllib.request.urlopen', side_effect=[ProviderResponse(broken), ProviderResponse(repaired)]):
+            repaired_reply = api('/api/chat', {'message': '测试协议修复', 'request_id': 'protocol-repaired'})
+        assert repaired_reply['reply_text'] == '这是修复后的可见回答。'
+        assert state()['messages'][-1]['content'] == '这是修复后的可见回答。'
+
+        with patch.dict(os.environ, provider_env), patch('modeling.urllib.request.urlopen', side_effect=[ProviderResponse(broken), ProviderResponse(broken)]):
+            fallback_reply = api('/api/chat', {'message': '测试安全降级', 'request_id': 'protocol-fallback'})
+        assert fallback_reply['model']['mode'] == 'local'
+        assert not fallback_reply['reply_text'].lstrip().startswith(('{', '[', '```'))
+        assert 'reply_text' not in fallback_reply['reply_text'] and '不应显示' not in fallback_reply['reply_text']
+        assert state()['messages'][-1]['content'] == fallback_reply['reply_text']
 
         api('/api/profile', {'memory_enabled': True})
         message = {'message': '我喜欢不透支生活的进步。希望你说话简短直接。', 'request_id': 'preferences'}
@@ -177,3 +208,4 @@ if __name__ == '__main__':
         assert stranger.get('/api/state').get_json()['events'] == []
         assert stranger.get('/api/state').get_json()['user']['id'] != uid
     print('PASS: V2 auth, consent, memory, durable jobs, offline focus, rewrite, goals, timed letters, import, history, drafts, weekly review, isolation; 1 flow')
+    print('SMOKE OK')
