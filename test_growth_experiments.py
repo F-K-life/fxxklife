@@ -259,6 +259,33 @@ class GrowthExperimentTests(unittest.TestCase):
         self.assertEqual(manual.status_code, 201)
         self.assertEqual(manual.get_json()["task"]["experiment_id"], experiment["id"])
 
+    def test_confirm_and_evidence_requests_are_idempotent(self):
+        experiment, capabilities = self.confirmed_experiment()
+        active = self.activate_week(experiment, capabilities[0], "evidence-week").get_json()
+        body = {"experiment_id": experiment["id"], "capability_id": capabilities[0]["id"],
+                "weekly_experiment_id": active["weekly_experiment"]["id"], "task_id": active["task"]["id"],
+                "kind": "reflection", "content": "我完成了练习并发现问题定义需要更具体。",
+                "source_label": "第一次真实练习", "confirmed_by_user": True, "request_id": "evidence-1"}
+        first = self.api("/api/growth-evidence", body)
+        self.assertEqual(first.status_code, 201)
+        replay = self.api("/api/growth-evidence", body)
+        self.assertEqual(replay.get_json(), first.get_json())
+        self.assertEqual(self.sql("SELECT COUNT(*) AS n FROM growth_evidence")[0]["n"], 1)
+        state = self.client.get("/api/state").get_json()
+        self.assertEqual(state["growth"]["capabilities"][0]["status"], "evidenced")
+
+    def test_evidence_requires_consistent_owned_sources(self):
+        experiment, capabilities = self.confirmed_experiment()
+        active = self.activate_week(experiment, capabilities[0], "invalid-source-week").get_json()
+        unrelated = self.api("/api/tasks", {"title": "无关任务", "first_step": "开始", "done_criteria": "结束", "planned_minutes": 5}).get_json()["task"]
+        response = self.api("/api/growth-evidence", {
+            "experiment_id": experiment["id"], "capability_id": capabilities[0]["id"],
+            "weekly_experiment_id": active["weekly_experiment"]["id"], "task_id": unrelated["id"],
+            "kind": "reflection", "content": "不应关联", "source_label": "错误来源",
+            "confirmed_by_user": True, "request_id": "bad-source"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.sql("SELECT COUNT(*) AS n FROM growth_evidence")[0]["n"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

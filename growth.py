@@ -394,3 +394,76 @@ def register_growth(app, services):
                            (g.user["id"], request_id, "confirm_week", weekly_id, json.dumps(result, ensure_ascii=False)))
         connection.commit()
         return jsonify(result)
+
+    def refresh_capability_status(capability_id):
+        supported = row("""SELECT id FROM growth_evidence WHERE user_id=? AND capability_id=?
+                           AND status='active' AND confirmed_by_user=1 LIMIT 1""",
+                        (g.user["id"], capability_id))
+        db().execute("UPDATE capabilities SET status=?,version=version+1,updated_at=? WHERE id=? AND user_id=?",
+                     ("evidenced" if supported else "practicing", now(), capability_id, g.user["id"]))
+
+    @app.post("/api/growth-evidence")
+    @auth
+    def create_growth_evidence():
+        body = data()
+        if not boolean(body, "confirmed_by_user"):
+            abort(400, description="请由你确认后再保存成长证据。")
+        request_id = text(body, "request_id", 100, True)
+        connection = db()
+        connection.execute("BEGIN IMMEDIATE")
+        repeated = row("SELECT result FROM growth_actions WHERE user_id=? AND request_id=?",
+                       (g.user["id"], request_id))
+        if repeated:
+            connection.commit()
+            return jsonify(json.loads(repeated["result"]))
+        experiment = owned("growth_experiments", number(body, "experiment_id"))
+        capability = owned("capabilities", number(body, "capability_id"))
+        weekly = owned("weekly_experiments", number(body, "weekly_experiment_id"))
+        if capability["experiment_id"] != experiment["id"] or weekly["experiment_id"] != experiment["id"]:
+            connection.rollback()
+            abort(400, description="证据与成长主题不匹配。")
+        sources = {}
+        for key, table in (("task_id", "tasks"), ("session_id", "focus_sessions"), ("event_id", "events")):
+            if body.get(key) is not None:
+                sources[key] = owned(table, number(body, key))
+        task = sources.get("task_id")
+        if task and (task.get("experiment_id") != experiment["id"] or task.get("weekly_experiment_id") != weekly["id"]
+                     or task.get("capability_id") != capability["id"]):
+            connection.rollback()
+            abort(400, description="证据来源与本周实验不匹配。")
+        kind = body.get("kind")
+        if kind not in ("artifact", "answer", "link", "reflection"):
+            connection.rollback()
+            abort(400, description="证据类型未识别。")
+        stamp = now()
+        evidence_id = connection.execute(
+            """INSERT INTO growth_evidence(user_id,experiment_id,capability_id,weekly_experiment_id,
+               task_id,session_id,event_id,kind,content,source_label,confirmed_by_user,created_at,updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,1,?,?)""",
+            (g.user["id"], experiment["id"], capability["id"], weekly["id"],
+             body.get("task_id"), body.get("session_id"), body.get("event_id"), kind,
+             text(body, "content", 5000, True), text(body, "source_label", 200, True), stamp, stamp),
+        ).lastrowid
+        refresh_capability_status(capability["id"])
+        result = {"evidence": row("SELECT * FROM growth_evidence WHERE id=?", (evidence_id,)),
+                  "capability": row("SELECT * FROM capabilities WHERE id=?", (capability["id"],))}
+        connection.execute("INSERT INTO growth_actions VALUES(?,?,?,?,?)",
+                           (g.user["id"], request_id, "create_evidence", evidence_id, json.dumps(result, ensure_ascii=False)))
+        connection.commit()
+        return jsonify(result), 201
+
+    @app.patch("/api/growth-evidence/<int:evidence_id>")
+    @auth
+    def update_growth_evidence(evidence_id):
+        evidence = owned("growth_evidence", evidence_id)
+        body = data()
+        status = body.get("status", evidence["status"])
+        if status not in ("active", "revoked"):
+            abort(400, description="证据状态未识别。")
+        db().execute("UPDATE growth_evidence SET status=?,content=?,source_label=?,updated_at=? WHERE id=?",
+                     (status, text(body, "content", 5000, True, evidence["content"]),
+                      text(body, "source_label", 200, True, evidence["source_label"]), now(), evidence_id))
+        refresh_capability_status(evidence["capability_id"])
+        db().commit()
+        return jsonify(evidence=owned("growth_evidence", evidence_id),
+                       capability=owned("capabilities", evidence["capability_id"]))
